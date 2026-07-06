@@ -14,6 +14,10 @@ __pycache__/
 .env
 .env.*
 !.env.example
+app.db
+*.db
+*.sqlite
+*.sqlite3
 
 # Local Data Store (Mitigating Git Bloat)
 data/raw/*
