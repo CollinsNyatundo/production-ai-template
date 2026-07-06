@@ -1,106 +1,121 @@
-import sqlite3
 import json
 import logging
-import os
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import delete, select
+
+from app.services.database import (
+    AgentCheckpoint,
+    Base,
+    ConversationMessage,
+    async_session,
+    engine,
+)
 
 logger = logging.getLogger("app.services.state_store")
 
+
 class StateStore:
-    def __init__(self, db_path: str = "app.db"):
-        self.db_path = db_path
-        self._init_db()
+    def __init__(self):
+        logger.info("Persistent State Store initialized utilizing SQLAlchemy ORM.")
 
-    def _get_connection(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path)
-
-    def _init_db(self) -> None:
-        logger.info(f"Initializing persistent SQLite State Store at: {os.path.abspath(self.db_path)}")
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Conversation memory table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS conversation_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT,
-                    role TEXT,
-                    content TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Agent checkpoint state table (E/S - Pitfall Mitigation)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS agent_checkpoints (
-                    session_id TEXT PRIMARY KEY,
-                    current_step INTEGER,
-                    state_json TEXT,
-                    trajectory_json TEXT,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.commit()
+    async def initialize_tables(self) -> None:
+        """Initializes database schema tables synchronously within the async flow."""
+        logger.info("Initializing persistent database schema tables...")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Schema tables check complete.")
 
     async def save_message(self, session_id: str, role: str, content: str) -> None:
         logger.info(f"Saving message to state store for session '{session_id}'")
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO conversation_history (session_id, role, content) VALUES (?, ?, ?)",
-                (session_id, role, content)
-            )
-            conn.commit()
+        async with async_session() as session:
+            async with session.begin():
+                msg = ConversationMessage(
+                    session_id=session_id, role=role, content=content
+                )
+                session.add(msg)
+            # Commit is handled automatically by the context manager begin block
 
     async def get_history(self, session_id: str) -> List[Dict[str, str]]:
         logger.info(f"Loading history from state store for session '{session_id}'")
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT role, content FROM conversation_history WHERE session_id = ? ORDER BY id ASC",
-                (session_id,)
+        async with async_session() as session:
+            stmt = (
+                select(ConversationMessage)
+                .where(ConversationMessage.session_id == session_id)
+                .order_by(ConversationMessage.id.asc())
             )
-            rows = cursor.fetchall()
-            return [{"role": r[0], "content": r[1]} for r in rows]
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+            return [{"role": msg.role, "content": msg.content} for msg in messages]
 
     async def clear_history(self, session_id: str) -> None:
         logger.info(f"Clearing history from state store for session '{session_id}'")
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM conversation_history WHERE session_id = ?", (session_id,))
-            conn.commit()
+        async with async_session() as session:
+            async with session.begin():
+                stmt = delete(ConversationMessage).where(
+                    ConversationMessage.session_id == session_id
+                )
+                await session.execute(stmt)
 
-    # Agent Checkpointing snapshot logic (S - Gap Mitigation)
-    async def save_checkpoint(self, session_id: str, current_step: int, state: Dict[str, Any], trajectory: List[Dict[str, Any]]) -> None:
-        logger.info(f"Saving agent checkpoint step {current_step} for session '{session_id}'")
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO agent_checkpoints (session_id, current_step, state_json, trajectory_json, updated_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(session_id) DO UPDATE SET
-                    current_step = excluded.current_step,
-                    state_json = excluded.state_json,
-                    trajectory_json = excluded.trajectory_json,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (session_id, current_step, json.dumps(state), json.dumps(trajectory)))
-            conn.commit()
+    async def save_checkpoint(
+        self,
+        session_id: str,
+        current_step: int,
+        state: Dict[str, Any],
+        trajectory: List[Dict[str, Any]],
+    ) -> None:
+        logger.info(
+            f"Saving agent checkpoint step {current_step} for session '{session_id}'"
+        )
+        async with async_session() as session:
+            async with session.begin():
+                # Select first to support database-agnostic update/insert
+                stmt = select(AgentCheckpoint).where(
+                    AgentCheckpoint.session_id == session_id
+                )
+                result = await session.execute(stmt)
+                checkpoint = result.scalar_one_or_none()
+
+                state_str = json.dumps(state)
+                traj_str = json.dumps(trajectory)
+
+                if checkpoint:
+                    checkpoint.current_step = current_step
+                    checkpoint.state_json = state_str
+                    checkpoint.trajectory_json = traj_str
+                else:
+                    checkpoint = AgentCheckpoint(
+                        session_id=session_id,
+                        current_step=current_step,
+                        state_json=state_str,
+                        trajectory_json=traj_str,
+                    )
+                    session.add(checkpoint)
 
     async def load_checkpoint(self, session_id: str) -> Optional[Dict[str, Any]]:
         logger.info(f"Loading agent checkpoint snapshot for session '{session_id}'")
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT current_step, state_json, trajectory_json FROM agent_checkpoints WHERE session_id = ?",
-                (session_id,)
+        async with async_session() as session:
+            stmt = select(AgentCheckpoint).where(
+                AgentCheckpoint.session_id == session_id
             )
-            row = cursor.fetchone()
-            if not row:
+            result = await session.execute(stmt)
+            checkpoint = result.scalar_one_or_none()
+            if not checkpoint:
                 return None
             return {
-                "current_step": row[0],
-                "state": json.loads(row[1]),
-                "trajectory": json.loads(row[2])
+                "current_step": checkpoint.current_step,
+                "state": json.loads(checkpoint.state_json),
+                "trajectory": json.loads(checkpoint.trajectory_json),
             }
+
+    async def clear_checkpoint(self, session_id: str) -> None:
+        logger.info(f"Clearing agent checkpoint snapshot for session '{session_id}'")
+        async with async_session() as session:
+            async with session.begin():
+                stmt = delete(AgentCheckpoint).where(
+                    AgentCheckpoint.session_id == session_id
+                )
+                await session.execute(stmt)
+
 
 state_store = StateStore()

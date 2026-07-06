@@ -1,0 +1,35 @@
+groups:
+  - name: production-ai-core-alerts
+    rules:
+      # 1. SLO Latency Violation: P95 latency > 3 seconds
+      - alert: HighQueryLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{handler="/api/query"}[5m])) by (le)) > 3.0
+        for: 2m
+        labels:
+          severity: warning
+          component: api-gateway
+        annotations:
+          summary: "High P95 latency on query endpoint"
+          description: "P95 latency of query execution is {{ $value }}s, exceeding the SLO threshold of 3.0s."
+
+      # 2. High Error Rate: HTTP 5xx errors > 2% of total traffic
+      - alert: HighAPIErrorRate
+        expr: (sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))) * 100 > 2.0
+        for: 1m
+        labels:
+          severity: critical
+          component: api-gateway
+        annotations:
+          summary: "High API Error Rate detected"
+          description: "API HTTP 5xx errors represent {{ $value }}% of total requests over the last 5 minutes (exceeding 2% threshold)."
+
+      # 3. Resilience Alert: LLM or Search API Circuit Breaker tripped (OPEN state)
+      - alert: CircuitBreakerTripped
+        expr: circuit_breaker_state{state="OPEN"} == 1
+        for: 0s # Alert immediately when tripped
+        labels:
+          severity: critical
+          component: resilience
+        annotations:
+          summary: "Resilience Circuit Breaker Tripped"
+          description: "Circuit breaker {{ $labels.breaker_name }} has entered the OPEN state. Downstream calls are fast-failing."

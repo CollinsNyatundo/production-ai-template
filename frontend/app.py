@@ -1,18 +1,19 @@
-import streamlit as st
-import httpx
 import os
-import time
+
+import httpx
+import streamlit as st
 
 # Styling configuration
 st.set_page_config(
     page_title="Enterprise AI Interface",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # Dark premium theme styles
-st.markdown("""
+st.markdown(
+    """
 <style>
     .reportview-container {
         background: #0e1117;
@@ -26,7 +27,9 @@ st.markdown("""
         text-align: center;
     }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Config
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
@@ -45,7 +48,7 @@ if st.sidebar.button("Clear Conversation"):
 # Query input
 query_input = st.text_input(
     "Ask a technical question about your architecture:",
-    placeholder="What is semantic caching?"
+    placeholder="What is semantic caching?",
 )
 
 if query_input:
@@ -58,41 +61,54 @@ if query_input:
                     json={
                         "query": query_input,
                         "session_id": session_id,
-                        "use_cache": use_cache
+                        "use_cache": use_cache,
                     },
-                    timeout=15.0
+                    timeout=15.0,
                 )
-                
+
             if response.status_code == 200:
                 data = response.json()
-                
+
                 # Metrics Row
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.markdown(f"<div class='metric-card'>⏱️ Latency<br/><b>{data.get('latency_ms', 0.0):.2f} ms</b></div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='metric-card'>⏱️ Latency<br/><b>{data.get('latency_ms', 0.0):.2f} ms</b></div>",
+                        unsafe_allow_html=True,
+                    )
                 with col2:
                     cache_status = "HIT (Saved Cost)" if data.get("cached") else "MISS"
-                    st.markdown(f"<div class='metric-card'>💾 Semantic Cache<br/><b>{cache_status}</b></div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='metric-card'>💾 Semantic Cache<br/><b>{cache_status}</b></div>",
+                        unsafe_allow_html=True,
+                    )
                 with col3:
-                    st.markdown(f"<div class='metric-card'>📈 Status<br/><b>Pipeline Success</b></div>", unsafe_allow_html=True)
-                
+                    st.markdown(
+                        "<div class='metric-card'>📈 Status<br/><b>Pipeline Success</b></div>",
+                        unsafe_allow_html=True,
+                    )
+
                 st.write("---")
-                
+
                 # Answer display
                 st.subheader("Response")
                 st.info(data.get("answer"))
-                
+
                 # Sources display
                 st.subheader("Retrieved Context Sources")
                 sources = data.get("sources", [])
                 if sources:
                     for i, src in enumerate(sources):
-                        with st.expander(f"Source {i+1}: {src.get('metadata', {}).get('source', 'Unknown')} (Score: {src.get('score'):.2f})"):
+                        with st.expander(
+                            f"Source {i + 1}: {src.get('metadata', {}).get('source', 'Unknown')} (Score: {src.get('score'):.2f})"
+                        ):
                             st.write(src.get("content"))
                 else:
                     st.warning("No context sources were retrieved or needed.")
             else:
                 st.error(f"Error {response.status_code}: {response.text}")
-                
+
         except Exception as e:
-            st.error(f"Failed to connect to backend service at {BACKEND_API_URL}. Details: {e}")
+            st.error(
+                f"Failed to connect to backend service at {BACKEND_API_URL}. Details: {e}"
+            )

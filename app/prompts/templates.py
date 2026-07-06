@@ -1,6 +1,6 @@
-RAG_SYSTEM_PROMPT = """You are a helpful production-grade AI assistant. 
+RAG_SYSTEM_PROMPT = """You are a helpful production-grade AI assistant.
 Use the provided retrieval context snippets to answer the user's question accurately.
-If you do not know the answer based on the context, state that you do not know. 
+If you do not know the answer based on the context, state that you do not know.
 Do not make up facts or hallucinate.
 """
 

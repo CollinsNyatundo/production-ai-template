@@ -1,8 +1,10 @@
 import logging
-from typing import List, Dict
+from typing import Dict, List
+
 from app.services.state_store import state_store
 
 logger = logging.getLogger("app.services.conversation")
+
 
 class ConversationService:
     async def get_history(self, session_id: str) -> List[Dict[str, str]]:
@@ -16,5 +18,6 @@ class ConversationService:
     async def clear_history(self, session_id: str) -> None:
         logger.info(f"Clearing history from SQLite for session: {session_id}")
         await state_store.clear_history(session_id)
+
 
 conversation_service = ConversationService()

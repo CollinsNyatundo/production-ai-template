@@ -1,0 +1,47 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install sqlalchemy asyncpg aiosqlite alembic pyjwt cryptography slowapi greenlet pytest pytest-cov ruff mypy bandit
+
+    - name: Code Style & Quality Checks (Ruff)
+      run: |
+        ruff check .
+        ruff format --check .
+
+    - name: Static Type Validation (Mypy)
+      run: |
+        mypy app
+
+    - name: Security Vulnerability Scanning (Bandit)
+      run: |
+        bandit -r app -ll -ii
+
+    - name: Run Test Suite (Pytest)
+      run: |
+        pytest --cov=app --cov-report=term-missing
+
+    - name: Execute Quality Evaluation Pipeline
+      run: |
+        python evaluation/offline_eval.py
