@@ -1,0 +1,39 @@
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Environment configurations and secrets
+.env
+.env.*
+!.env.example
+
+# Local Data Store (Mitigating Git Bloat)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Evaluation Cache & Local Outputs
+evaluation/eval_results/*
+!evaluation/eval_results/.gitkeep
+offline_eval_report.json
+
+# IDE / Editor configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker / Build outputs
+dist/
+build/
+*.egg-info/
+.docker-compose.local.env

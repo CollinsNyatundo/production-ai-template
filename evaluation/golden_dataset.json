@@ -1,0 +1,14 @@
+[
+  {
+    "id": "case_001",
+    "query": "What is semantic caching?",
+    "expected_concepts": ["caches embeddings", "saves cost", "reduces latency"],
+    "min_faithfulness_score": 0.85
+  },
+  {
+    "id": "case_002",
+    "query": "Explain how hybrid retrieval works.",
+    "expected_concepts": ["dense vector", "sparse bm25", "relevance score"],
+    "min_faithfulness_score": 0.80
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "index_name": "production-rag-index",
+  "vector_dimension": 1536,
+  "similarity_metric": "cosine",
+  "chunk_settings": {
+    "chunk_size": 512,
+    "chunk_overlap": 64
+  }
+}
