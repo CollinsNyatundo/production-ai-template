@@ -1,7 +1,7 @@
 # Production-Ready AI Application Template
 
 <p align="center">
-  <img src="file:///c%3A/Users/COLLINS/.gemini/antigravity/brain/f7a80fce-bcc6-48bf-a6f0-f8a0b72c15f7/codebase_preview_1783373081718.png" alt="Production AI Harness Template Cover" width="800"/>
+  <img src="./assets/codebase_preview.png" alt="Production AI Harness Template Cover" width="800"/>
 </p>
 
 This repository represents a robust, enterprise-grade template for building scalable, secure, and observable AI/LLM-based applications. It is based on a modern **9-layer AI application architecture** and integrates the formal **Agent Harness** framework:
