@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import List, Optional
 
 import tiktoken
 
@@ -14,7 +14,7 @@ class ContextManager:
         self.default_budget = default_budget
         logger.info(f"Context Manager initialized. Model: {default_model}, Budget: {default_budget} tokens")
 
-    def count_tokens(self, text: str, model: str = None) -> int:
+    def count_tokens(self, text: str, model: Optional[str] = None) -> int:
         model = model or self.default_model
         try:
             enc = tiktoken.encoding_for_model(model)
@@ -26,8 +26,8 @@ class ContextManager:
     async def pack_context(
         self,
         documents: List[SearchDocument],
-        token_budget: int = None,
-        model: str = None,
+        token_budget: Optional[int] = None,
+        model: Optional[str] = None,
     ) -> List[SearchDocument]:
         token_budget = token_budget or self.default_budget
         model = model or self.default_model

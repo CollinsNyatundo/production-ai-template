@@ -98,12 +98,13 @@ async def get_current_user(
     if token and isinstance(token, str):
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            username: str = payload.get("sub")
-            if username is None:
+            sub = payload.get("sub")
+            if sub is None or not isinstance(sub, str):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid authentication token: missing subject.",
                 )
+            username = sub
 
             # Fetch user profile from database
             user = MOCK_USERS.get(username)

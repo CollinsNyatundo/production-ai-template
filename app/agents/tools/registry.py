@@ -19,7 +19,7 @@ class ToolRegistry:
     ) -> None:
         # Introspect function parameters to generate JSON schemas automatically
         sig = inspect.signature(func)
-        parameters = {"type": "object", "properties": {}, "required": []}
+        parameters: Dict[str, Any] = {"type": "object", "properties": {}, "required": []}
 
         for param_name, param in sig.parameters.items():
             # Skip self parameter if it is a class method

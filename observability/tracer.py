@@ -10,7 +10,7 @@ current_user_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar("current
 
 
 class MockSpan:
-    def __init__(self, name: str, attributes: Dict[str, Any] = None):
+    def __init__(self, name: str, attributes: Optional[Dict[str, Any]] = None):
         self.name = name
         self.attributes = attributes or {}
         # Automatically enrich spans with current contextvar metadata if present
@@ -35,7 +35,7 @@ class Tracer:
         logger.info("Initializing OpenTelemetry Tracer Adapter...")
 
     @asynccontextmanager
-    async def span(self, name: str, attributes: Dict[str, Any] = None):
+    async def span(self, name: str, attributes: Optional[Dict[str, Any]] = None):
         logger.info(f"==> Trace Span START: '{name}'")
         span_obj = MockSpan(name, attributes)
 
