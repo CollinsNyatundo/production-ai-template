@@ -130,7 +130,9 @@ def run_historical_evaluation(test_cases: list) -> list:
                 # Check if this query matches any of our golden test cases
                 matched_case = None
                 for q_key, case in case_map.items():
-                    if q_key in query.lower() or query.lower() in q_key:
+                    q_normalized = q_key.strip("?. ").lower()
+                    query_normalized = query.strip("?. ").lower()
+                    if q_normalized == query_normalized:
                         matched_case = case
                         break
 
