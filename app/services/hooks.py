@@ -24,9 +24,7 @@ class LifecycleHooks:
         logger.info(f"Registered subscriber for lifecycle event: '{event}'")
 
     async def emit(self, event: str, **kwargs: Any) -> None:
-        logger.info(
-            f"Emitting lifecycle event: '{event}' (Args: {list(kwargs.keys())})"
-        )
+        logger.info(f"Emitting lifecycle event: '{event}' (Args: {list(kwargs.keys())})")
         callbacks = self._subscribers.get(event, [])
 
         # Execute callbacks concurrently using asyncio.gather

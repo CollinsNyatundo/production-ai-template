@@ -30,9 +30,7 @@ class StateStore:
         logger.info(f"Saving message to state store for session '{session_id}'")
         async with async_session() as session:
             async with session.begin():
-                msg = ConversationMessage(
-                    session_id=session_id, role=role, content=content
-                )
+                msg = ConversationMessage(session_id=session_id, role=role, content=content)
                 session.add(msg)
             # Commit is handled automatically by the context manager begin block
 
@@ -52,9 +50,7 @@ class StateStore:
         logger.info(f"Clearing history from state store for session '{session_id}'")
         async with async_session() as session:
             async with session.begin():
-                stmt = delete(ConversationMessage).where(
-                    ConversationMessage.session_id == session_id
-                )
+                stmt = delete(ConversationMessage).where(ConversationMessage.session_id == session_id)
                 await session.execute(stmt)
 
     async def save_checkpoint(
@@ -64,15 +60,11 @@ class StateStore:
         state: Dict[str, Any],
         trajectory: List[Dict[str, Any]],
     ) -> None:
-        logger.info(
-            f"Saving agent checkpoint step {current_step} for session '{session_id}'"
-        )
+        logger.info(f"Saving agent checkpoint step {current_step} for session '{session_id}'")
         async with async_session() as session:
             async with session.begin():
                 # Select first to support database-agnostic update/insert
-                stmt = select(AgentCheckpoint).where(
-                    AgentCheckpoint.session_id == session_id
-                )
+                stmt = select(AgentCheckpoint).where(AgentCheckpoint.session_id == session_id)
                 result = await session.execute(stmt)
                 checkpoint = result.scalar_one_or_none()
 
@@ -95,9 +87,7 @@ class StateStore:
     async def load_checkpoint(self, session_id: str) -> Optional[Dict[str, Any]]:
         logger.info(f"Loading agent checkpoint snapshot for session '{session_id}'")
         async with async_session() as session:
-            stmt = select(AgentCheckpoint).where(
-                AgentCheckpoint.session_id == session_id
-            )
+            stmt = select(AgentCheckpoint).where(AgentCheckpoint.session_id == session_id)
             result = await session.execute(stmt)
             checkpoint = result.scalar_one_or_none()
             if not checkpoint:
@@ -112,9 +102,7 @@ class StateStore:
         logger.info(f"Clearing agent checkpoint snapshot for session '{session_id}'")
         async with async_session() as session:
             async with session.begin():
-                stmt = delete(AgentCheckpoint).where(
-                    AgentCheckpoint.session_id == session_id
-                )
+                stmt = delete(AgentCheckpoint).where(AgentCheckpoint.session_id == session_id)
                 await session.execute(stmt)
 
 

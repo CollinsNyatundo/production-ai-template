@@ -35,9 +35,7 @@ class AgentCheckpoint(Base):
     current_step: Mapped[int] = mapped_column(Integer, nullable=False)
     state_json: Mapped[str] = mapped_column(Text, nullable=False)
     trajectory_json: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=func.now(), onupdate=func.now()
-    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 
 # 3. Connection selection and async engine selector
@@ -66,9 +64,7 @@ else:
 engine = create_async_engine(db_url, **engine_kwargs)
 
 # Async session sessionmaker factory
-async_session = async_sessionmaker(
-    bind=engine, class_=AsyncSession, expire_on_commit=False
-)
+async_session = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
 # Dependency yield provider for FastAPI routers

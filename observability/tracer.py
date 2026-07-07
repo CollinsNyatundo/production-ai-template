@@ -6,9 +6,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger("app.observability.tracer")
 
 # ContextVar to store tenant and user metadata for automatic trace propagation (S - Pattern)
-current_user_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
-    "current_user_context", default=None
-)
+current_user_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar("current_user_context", default=None)
 
 
 class MockSpan:
@@ -50,9 +48,7 @@ class Tracer:
             yield span_obj
         finally:
             # Output full span trace attributes log for mock visualization
-            logger.info(
-                f"<== Trace Span END: '{name}' | Attributes: {span_obj.attributes}"
-            )
+            logger.info(f"<== Trace Span END: '{name}' | Attributes: {span_obj.attributes}")
 
 
 tracer = Tracer()

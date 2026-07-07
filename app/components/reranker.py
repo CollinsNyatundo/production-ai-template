@@ -11,9 +11,7 @@ class Reranker:
         # In production, load a cross-encoder model (e.g. Cohere Rerank or HuggingFace cross-encoder)
         logger.info("Initializing Cross-Encoder Reranker component...")
 
-    async def rerank(
-        self, query: str, documents: List[SearchDocument]
-    ) -> List[SearchDocument]:
+    async def rerank(self, query: str, documents: List[SearchDocument]) -> List[SearchDocument]:
         logger.info(f"Reranking {len(documents)} documents for query: '{query}'")
 
         # Simple simulated reranking: sort by original retrieval score

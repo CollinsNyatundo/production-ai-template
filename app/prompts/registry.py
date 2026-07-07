@@ -29,9 +29,7 @@ class PromptRegistry:
             # In production: return await remote_client.get_prompt(name)
             pass
         except Exception as e:
-            logger.error(
-                f"Failed to fetch remote prompt '{name}', falling back to local. Error: {e}"
-            )
+            logger.error(f"Failed to fetch remote prompt '{name}', falling back to local. Error: {e}")
 
         return self._local_prompts.get(name, "You are a helpful AI assistant.")
 

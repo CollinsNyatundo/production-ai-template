@@ -9,9 +9,7 @@ logger = logging.getLogger("app.agents.tools.vector_search")
 
 class VectorSearchTool:
     name = "vector_search"
-    description = (
-        "Searches the internal semantic index and vector database for RAG context."
-    )
+    description = "Searches the internal semantic index and vector database for RAG context."
 
     async def execute(self, query: str) -> List[SearchDocument]:
         logger.info(f"Vector search tool called with query: '{query}'")

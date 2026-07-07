@@ -14,18 +14,14 @@ class AgentExecutor:
         self.max_turns = max_turns
         logger.info(f"Agent Executor initialized with max_turns={max_turns}")
 
-    async def execute_trajectory(
-        self, session_id: str, query: str, actor_permission: str = "low"
-    ) -> Dict[str, Any]:
+    async def execute_trajectory(self, session_id: str, query: str, actor_permission: str = "low") -> Dict[str, Any]:
         # Emit event
         await lifecycle_hooks.emit("on_agent_start", session_id=session_id, query=query)
 
         # 1. State Store Checkpoint Recovery (S - Pitfall Mitigation)
         checkpoint = await state_store.load_checkpoint(session_id)
         if checkpoint:
-            logger.info(
-                f"Checkpoint recovered for session '{session_id}' at step {checkpoint['current_step']}."
-            )
+            logger.info(f"Checkpoint recovered for session '{session_id}' at step {checkpoint['current_step']}.")
             step_count = checkpoint["current_step"]
             agent_state = checkpoint["state"]
             trajectory = checkpoint["trajectory"]
@@ -41,9 +37,7 @@ class AgentExecutor:
 
             # Simulated Agent Thought and Decision
             # In production, call LLM with system instructions, current state, tools schema, and trajectory
-            await lifecycle_hooks.emit(
-                "on_llm_call", session_id=session_id, step=step_count
-            )
+            await lifecycle_hooks.emit("on_llm_call", session_id=session_id, step=step_count)
 
             # Mock reasoning steps:
             if step_count == 1:
@@ -61,9 +55,7 @@ class AgentExecutor:
                 agent_state["completed"] = True
 
             # Trigger LLM call hook finish
-            await lifecycle_hooks.emit(
-                "on_llm_end", session_id=session_id, step=step_count, thought=thought
-            )
+            await lifecycle_hooks.emit("on_llm_end", session_id=session_id, step=step_count, thought=thought)
 
             # 3. Tool Execution
             observation = ""
@@ -84,18 +76,14 @@ class AgentExecutor:
                     )
                     # Convert search objects to readable text
                     if isinstance(observation_raw, list):
-                        observation = "\n".join(
-                            [doc.content for doc in observation_raw]
-                        )
+                        observation = "\n".join([doc.content for doc in observation_raw])
                     else:
                         observation = str(observation_raw)
                 except CircuitBreakerOpenException as e:
                     observation = f"Tool execution blocked by circuit breaker: {str(e)}"
                     logger.error(f"Circuit Breaker open for search tools: {e}")
                 except Exception as e:
-                    await lifecycle_hooks.emit(
-                        "on_error", session_id=session_id, error=e
-                    )
+                    await lifecycle_hooks.emit("on_error", session_id=session_id, error=e)
                     observation = f"Tool execution failed: {str(e)}"
                     logger.error(f"Error executing tool in loop: {e}")
 
@@ -110,15 +98,11 @@ class AgentExecutor:
             trajectory.append(step_record)
 
             # 4. Checkpoint saving to State Store after every step
-            await state_store.save_checkpoint(
-                session_id, step_count, agent_state, trajectory
-            )
+            await state_store.save_checkpoint(session_id, step_count, agent_state, trajectory)
 
         # Handle termination edge-case (E - Gap Mitigation)
         if step_count >= self.max_turns and not agent_state.get("completed"):
-            logger.warning(
-                f"Agent terminated: Exceeded max turn limit ({self.max_turns}) for query: '{query}'"
-            )
+            logger.warning(f"Agent terminated: Exceeded max turn limit ({self.max_turns}) for query: '{query}'")
             trajectory.append(
                 {
                     "turn": step_count,

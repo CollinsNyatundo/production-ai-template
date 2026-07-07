@@ -65,9 +65,7 @@ MOCK_USERS = {
 }
 
 
-def create_access_token(
-    data: dict, expires_delta: Optional[datetime.timedelta] = None
-) -> str:
+def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] = None) -> str:
     """Generates a signed JWT bearer token."""
     to_encode = data.copy()
     if expires_delta:
@@ -91,14 +89,10 @@ async def get_current_user(
     if api_key and isinstance(api_key, str):
         user = MOCK_API_KEYS.get(api_key)
         if user:
-            logger.info(
-                f"Authenticated user '{user.username}' via API Key (Tenant: {user.tenant_id})"
-            )
+            logger.info(f"Authenticated user '{user.username}' via API Key (Tenant: {user.tenant_id})")
             return user
         logger.warning("Invalid API Key header provided.")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key."
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key.")
 
     # 2. JWT Bearer Token Authentication Check
     if token and isinstance(token, str):
@@ -119,9 +113,7 @@ async def get_current_user(
                     detail="User profile not found.",
                 )
 
-            logger.info(
-                f"Authenticated user '{user.username}' via JWT Bearer (Tenant: {user.tenant_id})"
-            )
+            logger.info(f"Authenticated user '{user.username}' via JWT Bearer (Tenant: {user.tenant_id})")
             return user
         except jwt.PyJWTError as e:
             logger.warning(f"JWT decode error: {e}")
@@ -132,9 +124,7 @@ async def get_current_user(
 
     # Fallback to local anonymous developer access if in development environment
     if settings.app_env == "development":
-        logger.warning(
-            "No auth header provided. Falling back to default developer user profile."
-        )
+        logger.warning("No auth header provided. Falling back to default developer user profile.")
         return User(
             username="dev_anon",
             role="admin",

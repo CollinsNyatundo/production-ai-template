@@ -53,16 +53,12 @@ class ToolRegistry:
                 "parameters": parameters,
             },
         }
-        logger.info(
-            f"Registered tool: '{name}' (Permission required: {required_permission})"
-        )
+        logger.info(f"Registered tool: '{name}' (Permission required: {required_permission})")
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         return [t["schema"] for t in self._tools.values()]
 
-    async def execute_tool(
-        self, name: str, args: Dict[str, Any], actor_permission: str = "low"
-    ) -> Any:
+    async def execute_tool(self, name: str, args: Dict[str, Any], actor_permission: str = "low") -> Any:
         logger.info(f"Executing tool '{name}' with args {args}")
 
         tool = self._tools.get(name)
@@ -73,9 +69,7 @@ class ToolRegistry:
         required_perm = tool["required_permission"]
         if required_perm == "high" and actor_permission != "high":
             # Simulate rejection or request for user-in-the-loop authorization
-            logger.warning(
-                f"BLOCKED: Tool '{name}' requires high permission. Actor has '{actor_permission}'"
-            )
+            logger.warning(f"BLOCKED: Tool '{name}' requires high permission. Actor has '{actor_permission}'")
             return f"Error: Execution blocked. Tool '{name}' requires high level permissions. Please confirm."
 
         # Execute

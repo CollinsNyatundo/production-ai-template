@@ -12,9 +12,7 @@ class ContextManager:
     def __init__(self, default_model: str = "gpt-4o", default_budget: int = 2000):
         self.default_model = default_model
         self.default_budget = default_budget
-        logger.info(
-            f"Context Manager initialized. Model: {default_model}, Budget: {default_budget} tokens"
-        )
+        logger.info(f"Context Manager initialized. Model: {default_model}, Budget: {default_budget} tokens")
 
     def count_tokens(self, text: str, model: str = None) -> int:
         model = model or self.default_model
@@ -34,9 +32,7 @@ class ContextManager:
         token_budget = token_budget or self.default_budget
         model = model or self.default_model
 
-        logger.info(
-            f"Packing context documents into budget: {token_budget} tokens (Model: {model})"
-        )
+        logger.info(f"Packing context documents into budget: {token_budget} tokens (Model: {model})")
 
         # Sort documents by relevance score descending first
         sorted_docs = sorted(documents, key=lambda d: d.score, reverse=True)
@@ -57,16 +53,9 @@ class ContextManager:
                 # PITFALL MITIGATION: Instead of crashing or ignoring context window overflow,
                 # we dynamically truncate the document to pack the remaining token budget.
                 remaining_tokens = token_budget - current_tokens
-                if (
-                    remaining_tokens > 20
-                ):  # Only truncate if it is worth adding a snippet
-                    truncated_content = self._truncate_text_to_tokens(
-                        doc.content, remaining_tokens, model
-                    )
-                    doc.content = (
-                        truncated_content
-                        + "\n[Content truncated due to token budget limits]"
-                    )
+                if remaining_tokens > 20:  # Only truncate if it is worth adding a snippet
+                    truncated_content = self._truncate_text_to_tokens(doc.content, remaining_tokens, model)
+                    doc.content = truncated_content + "\n[Content truncated due to token budget limits]"
                     doc.score = doc.score * 0.8  # Lower score due to truncation
                     packed_docs.append(doc)
                     current_tokens += remaining_tokens
@@ -77,9 +66,7 @@ class ContextManager:
 
         return packed_docs
 
-    def _truncate_text_to_tokens(
-        self, text: str, target_tokens: int, model: str
-    ) -> str:
+    def _truncate_text_to_tokens(self, text: str, target_tokens: int, model: str) -> str:
         try:
             enc = tiktoken.encoding_for_model(model)
         except Exception:

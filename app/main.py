@@ -85,9 +85,7 @@ async def query_endpoint(
         payload.actor_permission = current_user.permission_level
 
         # Inject tenant identity into query request context (e.g. for trace and DB isolation)
-        logger.info(
-            f"Executing query for tenant '{current_user.tenant_id}' (User: {current_user.username})"
-        )
+        logger.info(f"Executing query for tenant '{current_user.tenant_id}' (User: {current_user.username})")
 
         response = await rag_pipeline.execute(payload)
         latency = (time.perf_counter() - start_time) * 1000.0

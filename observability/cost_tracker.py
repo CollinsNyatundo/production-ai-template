@@ -12,9 +12,7 @@ class CostTracker:
         "claude-3-5-sonnet": {"input": 3.00, "output": 15.00},
     }
 
-    async def track_usage(
-        self, model: str, prompt_tokens: int, completion_tokens: int
-    ) -> Dict[str, float]:
+    async def track_usage(self, model: str, prompt_tokens: int, completion_tokens: int) -> Dict[str, float]:
         logger.info(f"Tracking token usage for model '{model}'")
 
         # Calculate cost

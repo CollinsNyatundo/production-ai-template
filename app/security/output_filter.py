@@ -5,9 +5,7 @@ logger = logging.getLogger("app.security.output_filter")
 
 class OutputFilter:
     async def sanitize(self, response: str) -> str:
-        logger.info(
-            "Scanning LLM response output for hallucinations and safety compliance..."
-        )
+        logger.info("Scanning LLM response output for hallucinations and safety compliance...")
 
         # MOCK OUTPUT FILTER: In production, check alignment, factual correctness,
         # toxic outputs, or accidental API key leaks.

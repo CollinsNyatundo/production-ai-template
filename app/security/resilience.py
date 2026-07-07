@@ -43,12 +43,8 @@ class AsyncCircuitBreaker:
                 )
                 self.state = "HALF-OPEN"
             else:
-                logger.error(
-                    f"Circuit Breaker '{self.name}' is OPEN. Fast-failing execution."
-                )
-                raise CircuitBreakerOpenException(
-                    f"Circuit Breaker '{self.name}' is currently OPEN. Call blocked."
-                )
+                logger.error(f"Circuit Breaker '{self.name}' is OPEN. Fast-failing execution.")
+                raise CircuitBreakerOpenException(f"Circuit Breaker '{self.name}' is currently OPEN. Call blocked.")
 
         # 2. Execution block
         try:
@@ -59,9 +55,7 @@ class AsyncCircuitBreaker:
 
             # Success logic
             if self.state == "HALF-OPEN":
-                logger.info(
-                    f"Circuit Breaker '{self.name}' successfully recovered. Transitioning to CLOSED."
-                )
+                logger.info(f"Circuit Breaker '{self.name}' successfully recovered. Transitioning to CLOSED.")
                 self.state = "CLOSED"
                 self.failure_count = 0
             return result
@@ -74,13 +68,8 @@ class AsyncCircuitBreaker:
                 f"Circuit Breaker '{self.name}' caught failure {self.failure_count}/{self.failure_threshold}: {e}"
             )
 
-            if (
-                self.state in ("CLOSED", "HALF-OPEN")
-                and self.failure_count >= self.failure_threshold
-            ):
-                logger.error(
-                    f"Circuit Breaker '{self.name}' tripped! Transitioning to OPEN state."
-                )
+            if self.state in ("CLOSED", "HALF-OPEN") and self.failure_count >= self.failure_threshold:
+                logger.error(f"Circuit Breaker '{self.name}' tripped! Transitioning to OPEN state.")
                 self.state = "OPEN"
 
             raise e

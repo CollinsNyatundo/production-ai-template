@@ -7,9 +7,7 @@ class OnlineMonitor:
     def __init__(self):
         logger.info("Initializing Online Monitoring and Guardrail Auditing tracker...")
 
-    async def log_transaction(
-        self, query: str, answer: str, latency_ms: float, cost_usd: float
-    ) -> None:
+    async def log_transaction(self, query: str, answer: str, latency_ms: float, cost_usd: float) -> None:
         # In production, push structured payloads to Prometheus, Arize Phoenix, or Datadog
         logger.info("Audit Transaction Log:")
         logger.info(f"  Query: '{query}'")

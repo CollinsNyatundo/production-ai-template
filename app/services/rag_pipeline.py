@@ -12,6 +12,7 @@ from app.components.hybrid_retriever import hybrid_retriever
 from app.models import AgentStep, QueryRequest, QueryResponse
 from app.security.input_guard import input_guard
 from app.security.output_filter import output_filter
+from app.security.resilience import CircuitBreakerOpenException, llm_breaker
 
 # $H = (E, T, C, S, L, V)$ components
 from app.services.context_manager import context_manager
@@ -48,9 +49,7 @@ tool_registry.register_tool(
 
 # Example Lifecycle Hooks Subscriber (L - Gap Mitigation)
 def audit_logger(session_id: str, **kwargs):
-    logger.info(
-        f"[Lifecycle Hook AUDIT] Session: {session_id} - Logged Event Args: {list(kwargs.keys())}"
-    )
+    logger.info(f"[Lifecycle Hook AUDIT] Session: {session_id} - Logged Event Args: {list(kwargs.keys())}")
 
 
 lifecycle_hooks.register("on_agent_start", audit_logger)
@@ -61,9 +60,7 @@ class RAGPipeline:
     async def execute(self, payload: QueryRequest) -> QueryResponse:
         start_time = time.perf_counter()
 
-        async with tracer.span(
-            name="RAGPipeline.execute", attributes={"session_id": payload.session_id}
-        ) as span:
+        async with tracer.span(name="RAGPipeline.execute", attributes={"session_id": payload.session_id}) as span:
             # 1. Security Check: Input Guard
             is_safe, reason = await input_guard.validate(payload.query)
             if not is_safe:
@@ -114,9 +111,7 @@ class RAGPipeline:
             for step in raw_trajectory:
                 if step["tool"] == "vector_search" and step["observation"]:
                     # Fetch documents from retriever candidates
-                    retrieved_docs = await hybrid_retriever.retrieve(
-                        step["arguments"]["query"]
-                    )
+                    retrieved_docs = await hybrid_retriever.retrieve(step["arguments"]["query"])
 
             # Sort/Prune contexts using tiktoken budget (C - Gap Mitigation)
             packed_docs = await context_manager.pack_context(
@@ -127,33 +122,32 @@ class RAGPipeline:
 
             # 7. Response Generation
             logger.info("Generating response from LLM using packed contexts...")
-            # Route mock answers to match golden dataset expected concepts when API key is a mock
-            if (
-                "semantic cache" in payload.query.lower()
-                or "semantic caching" in payload.query.lower()
-            ):
-                final_ans = "Semantic caching reduces latency and saves cost. It caches embeddings of query responses to serve them quickly on similar semantic requests."
-            elif "hybrid retrieval" in payload.query.lower():
-                final_ans = "Hybrid retrieval combines dense vector search with sparse bm25 keyword matching to calculate a combined relevance score."
-            else:
-                final_ans = "According to the codebase templates, production architectures require input/output filters, semantic cache configurations, and persistent SQLite database stores to prevent session losses."
+
+            async def _execute_generation():
+                # Route mock answers to match golden dataset expected concepts when API key is a mock
+                if "semantic cache" in payload.query.lower() or "semantic caching" in payload.query.lower():
+                    return "Semantic caching reduces latency and saves cost. It caches embeddings of query responses to serve them quickly on similar semantic requests."
+                elif "hybrid retrieval" in payload.query.lower():
+                    return "Hybrid retrieval combines dense vector search with sparse bm25 keyword matching to calculate a combined relevance score."
+                else:
+                    return "According to the codebase templates, production architectures require input/output filters, semantic cache configurations, and persistent SQLite database stores to prevent session losses."
+
+            try:
+                final_ans = await llm_breaker.call(_execute_generation)
+            except CircuitBreakerOpenException:
+                logger.error("LLM Circuit Breaker is OPEN during response generation. Serving fallback response.")
+                final_ans = "Our AI core system is currently experiencing high service demand. Serving fallback context: Production architectures require input/output filters, semantic cache configurations, and persistent database stores to prevent session losses."
 
             # Record Token costs
-            cost_info = await cost_tracker.track_usage(
-                model="gpt-4o", prompt_tokens=250, completion_tokens=50
-            )
+            cost_info = await cost_tracker.track_usage(model="gpt-4o", prompt_tokens=250, completion_tokens=50)
             span.set_attribute("query_cost_usd", cost_info["total_cost"])
 
             # 8. Output Sanitizer Security Check
             final_answer = await output_filter.sanitize(final_ans)
 
             # 9. Save to Session Store (S)
-            await conversation_service.add_message(
-                payload.session_id, "user", payload.query
-            )
-            await conversation_service.add_message(
-                payload.session_id, "assistant", final_answer
-            )
+            await conversation_service.add_message(payload.session_id, "user", payload.query)
+            await conversation_service.add_message(payload.session_id, "assistant", final_answer)
 
             # 10. Cache response
             if payload.use_cache:

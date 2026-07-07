@@ -38,11 +38,7 @@ class HybridRetriever:
         ]
 
         # Filter mock results by query keywords if present
-        results = [
-            doc
-            for doc in mock_docs
-            if any(word in doc.content.lower() for word in query.lower().split())
-        ]
+        results = [doc for doc in mock_docs if any(word in doc.content.lower() for word in query.lower().split())]
 
         # Fallback to all mock docs if no keywords match
         if not results:

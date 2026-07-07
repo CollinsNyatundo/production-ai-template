@@ -109,6 +109,4 @@ if query_input:
                 st.error(f"Error {response.status_code}: {response.text}")
 
         except Exception as e:
-            st.error(
-                f"Failed to connect to backend service at {BACKEND_API_URL}. Details: {e}"
-            )
+            st.error(f"Failed to connect to backend service at {BACKEND_API_URL}. Details: {e}")

@@ -7,12 +7,8 @@ logger = logging.getLogger("app.security.content_filter")
 
 
 class ContentFilter:
-    async def filter_contexts(
-        self, contexts: List[SearchDocument]
-    ) -> List[SearchDocument]:
-        logger.info(
-            f"Filtering {len(contexts)} retrieved document contents for toxicity or sensitive PII..."
-        )
+    async def filter_contexts(self, contexts: List[SearchDocument]) -> List[SearchDocument]:
+        logger.info(f"Filtering {len(contexts)} retrieved document contents for toxicity or sensitive PII...")
 
         # MOCK CONTENT FILTER: In production, filters proprietary database records,
         # toxic database texts, or sensitive user PII leaks (e.g. credit cards/passwords)

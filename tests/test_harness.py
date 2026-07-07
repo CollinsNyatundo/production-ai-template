@@ -32,9 +32,7 @@ def setup_test_db():
 @pytest.mark.asyncio
 async def test_context_manager_tokens():
     # Test token counting
-    tokens = context_manager.count_tokens(
-        "Semantic caching is awesome.", model="gpt-4o"
-    )
+    tokens = context_manager.count_tokens("Semantic caching is awesome.", model="gpt-4o")
     assert tokens > 0
 
     # Test packing and truncation
@@ -44,9 +42,7 @@ async def test_context_manager_tokens():
             score=0.9,
             metadata={"source": "doc1"},
         ),
-        SearchDocument(
-            content="Short content", score=0.95, metadata={"source": "doc2"}
-        ),
+        SearchDocument(content="Short content", score=0.95, metadata={"source": "doc2"}),
     ]
     packed = await context_manager.pack_context(docs, token_budget=50, model="gpt-4o")
     # Assert that the budget was respected and the large doc was truncated
@@ -63,15 +59,11 @@ async def test_tool_registry_permissions():
 
     # Test permission gating (T - Gap Mitigation)
     # Executing code_search (high permission) with low permission actor should get blocked
-    res_blocked = await tool_registry.execute_tool(
-        "code_search", {"query": "config"}, actor_permission="low"
-    )
+    res_blocked = await tool_registry.execute_tool("code_search", {"query": "config"}, actor_permission="low")
     assert "blocked" in res_blocked.lower()
 
     # Executing with high permission actor should succeed
-    res_success = await tool_registry.execute_tool(
-        "code_search", {"query": "config"}, actor_permission="high"
-    )
+    res_success = await tool_registry.execute_tool("code_search", {"query": "config"}, actor_permission="high")
     assert "settings" in res_success[0].content.lower()
 
 
@@ -107,9 +99,7 @@ async def test_sqlalchemy_state_store():
     # Checkpoint snapshot testing (S - Gap Mitigation)
     state = {"stage": "reasoning"}
     trajectory = [{"turn": 1, "thought": "running"}]
-    await state_store.save_checkpoint(
-        session_id, current_step=1, state=state, trajectory=trajectory
-    )
+    await state_store.save_checkpoint(session_id, current_step=1, state=state, trajectory=trajectory)
 
     checkpoint = await state_store.load_checkpoint(session_id)
     assert checkpoint is not None
@@ -120,9 +110,7 @@ async def test_sqlalchemy_state_store():
 @pytest.mark.asyncio
 async def test_agent_executor_loop():
     # Execute full trajectory
-    res = await agent_executor.execute_trajectory(
-        "exec-session", "What is caching?", actor_permission="low"
-    )
+    res = await agent_executor.execute_trajectory("exec-session", "What is caching?", actor_permission="low")
     assert "trajectory" in res
     assert len(res["trajectory"]) > 0
     assert res["completed"] is True
@@ -131,9 +119,7 @@ async def test_agent_executor_loop():
 @pytest.mark.asyncio
 async def test_full_harness_pipeline():
     # Test full end-to-end run
-    payload = QueryRequest(
-        query="caching", session_id="pipeline-session", use_cache=False
-    )
+    payload = QueryRequest(query="caching", session_id="pipeline-session", use_cache=False)
     response = await rag_pipeline.execute(payload)
 
     assert response.answer is not None
@@ -168,9 +154,7 @@ async def test_jwt_auth():
 
 @pytest.mark.asyncio
 async def test_circuit_breaker():
-    breaker = AsyncCircuitBreaker(
-        "TestBreaker", failure_threshold=2, recovery_timeout=0.2
-    )
+    breaker = AsyncCircuitBreaker("TestBreaker", failure_threshold=2, recovery_timeout=0.2)
 
     async def mock_failing_call():
         raise ValueError("Mock LLM Down")
