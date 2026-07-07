@@ -23,7 +23,7 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install sqlalchemy asyncpg aiosqlite alembic pyjwt cryptography slowapi greenlet pytest pytest-cov ruff mypy bandit
+        python -m pip install . pytest pytest-cov ruff mypy bandit
 
     - name: Code Style & Quality Checks (Ruff)
       run: |
@@ -44,4 +44,4 @@ jobs:
 
     - name: Execute Quality Evaluation Pipeline
       run: |
-        python evaluation/offline_eval.py
+        PYTHONPATH=. python evaluation/offline_eval.py
