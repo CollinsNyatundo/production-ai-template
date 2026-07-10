@@ -21,14 +21,6 @@ from app.services.rag_pipeline import rag_pipeline
 from app.services.state_store import state_store
 
 
-# Autouse session fixture to initialize database tables before tests run
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_db():
-    import asyncio
-
-    asyncio.run(state_store.initialize_tables())
-
-
 @pytest.mark.asyncio
 async def test_context_manager_tokens():
     # Test token counting
@@ -62,9 +54,13 @@ async def test_tool_registry_permissions():
     res_blocked = await tool_registry.execute_tool("code_search", {"query": "config"}, actor_permission="low")
     assert "blocked" in res_blocked.lower()
 
-    # Executing with high permission actor should succeed
+    # Executing with high permission actor should succeed and return a real match
+    # from the actual repository source tree (code_search.py now genuinely greps
+    # app/ rather than returning one hardcoded snippet).
     res_success = await tool_registry.execute_tool("code_search", {"query": "config"}, actor_permission="high")
-    assert "settings" in res_success[0].content.lower()
+    assert len(res_success) > 0
+    assert "config" in res_success[0].content.lower()
+    assert res_success[0].metadata["source"]  # a real relative file path, not a hardcoded placeholder
 
 
 @pytest.mark.asyncio

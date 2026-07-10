@@ -1,5 +1,6 @@
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -46,10 +47,14 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
-# CORS Middlewares
+# CORS Middleware - explicit origin allow-list. allow_origins=["*"] combined with
+# allow_credentials=True is a known misconfiguration: Starlette reflects the
+# request's actual Origin header back rather than sending a literal "*" in that
+# combination, which means any site can make credentialed cross-origin requests.
+# (See CVE-2026-32610 for a recent real-world instance of exactly this pattern.)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,8 +96,12 @@ async def query_endpoint(
         latency = (time.perf_counter() - start_time) * 1000.0
         response.latency_ms = latency
         return response
-    except Exception as e:
-        logger.exception("Error executing query pipeline")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        error_id = uuid.uuid4().hex[:12]
+        logger.exception(f"Error executing query pipeline (error_id={error_id})")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An internal error occurred. Reference: {error_id}",
+        )
     finally:
         current_user_context.reset(ctx_token)

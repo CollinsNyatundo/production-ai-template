@@ -27,51 +27,71 @@ class AsyncCircuitBreaker:
         self.failure_count = 0
         self.state = "CLOSED"  # CLOSED, OPEN, HALF-OPEN
         self.last_failure_time = 0.0
+        # Guards state transitions only (not the wrapped call itself) so concurrent
+        # traffic in CLOSED state is never serialized. Also tracks whether a single
+        # HALF-OPEN probe is already in flight, so a burst of concurrent callers
+        # during recovery doesn't all rush the downstream service at once - only
+        # one probe call is let through; the rest fail fast until it resolves.
+        self._lock = asyncio.Lock()
+        self._half_open_probe_in_flight = False
         logger.info(
             f"Circuit Breaker '{name}' initialized (threshold={failure_threshold}, timeout={recovery_timeout}s)"
         )
 
     async def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        current_time = time.time()
+        async with self._lock:
+            current_time = time.time()
 
-        # 1. State check
-        if self.state == "OPEN":
-            # Check if recovery timeout has expired to transition to HALF-OPEN
-            if current_time - self.last_failure_time >= self.recovery_timeout:
-                logger.warning(
-                    f"Circuit Breaker '{self.name}' transitioning from OPEN to HALF-OPEN (recovery timeout expired)"
-                )
-                self.state = "HALF-OPEN"
-            else:
-                logger.error(f"Circuit Breaker '{self.name}' is OPEN. Fast-failing execution.")
-                raise CircuitBreakerOpenException(f"Circuit Breaker '{self.name}' is currently OPEN. Call blocked.")
+            if self.state == "OPEN":
+                if current_time - self.last_failure_time >= self.recovery_timeout:
+                    logger.warning(
+                        f"Circuit Breaker '{self.name}' transitioning from OPEN to HALF-OPEN "
+                        "(recovery timeout expired)"
+                    )
+                    self.state = "HALF-OPEN"
+                    self._half_open_probe_in_flight = True
+                else:
+                    logger.error(f"Circuit Breaker '{self.name}' is OPEN. Fast-failing execution.")
+                    raise CircuitBreakerOpenException(
+                        f"Circuit Breaker '{self.name}' is currently OPEN. Call blocked."
+                    )
+            elif self.state == "HALF-OPEN":
+                if self._half_open_probe_in_flight:
+                    logger.warning(
+                        f"Circuit Breaker '{self.name}' is HALF-OPEN with a probe already in flight. "
+                        "Fast-failing this concurrent call rather than piling onto the recovering service."
+                    )
+                    raise CircuitBreakerOpenException(
+                        f"Circuit Breaker '{self.name}' is HALF-OPEN; a recovery probe is already in flight."
+                    )
+                self._half_open_probe_in_flight = True
+            # else: CLOSED - proceed without serializing
 
-        # 2. Execution block
         try:
             if asyncio.iscoroutinefunction(func):
                 result = await func(*args, **kwargs)
             else:
                 result = func(*args, **kwargs)
 
-            # Success logic
-            if self.state == "HALF-OPEN":
-                logger.info(f"Circuit Breaker '{self.name}' successfully recovered. Transitioning to CLOSED.")
-                self.state = "CLOSED"
-                self.failure_count = 0
+            async with self._lock:
+                if self.state == "HALF-OPEN":
+                    logger.info(f"Circuit Breaker '{self.name}' successfully recovered. Transitioning to CLOSED.")
+                    self.state = "CLOSED"
+                    self.failure_count = 0
+                self._half_open_probe_in_flight = False
             return result
 
         except Exception as e:
-            # Failure logic
-            self.failure_count += 1
-            self.last_failure_time = time.time()
-            logger.error(
-                f"Circuit Breaker '{self.name}' caught failure {self.failure_count}/{self.failure_threshold}: {e}"
-            )
-
-            if self.state in ("CLOSED", "HALF-OPEN") and self.failure_count >= self.failure_threshold:
-                logger.error(f"Circuit Breaker '{self.name}' tripped! Transitioning to OPEN state.")
-                self.state = "OPEN"
-
+            async with self._lock:
+                self.failure_count += 1
+                self.last_failure_time = time.time()
+                logger.error(
+                    f"Circuit Breaker '{self.name}' caught failure {self.failure_count}/{self.failure_threshold}: {e}"
+                )
+                if self.state in ("CLOSED", "HALF-OPEN") and self.failure_count >= self.failure_threshold:
+                    logger.error(f"Circuit Breaker '{self.name}' tripped! Transitioning to OPEN state.")
+                    self.state = "OPEN"
+                self._half_open_probe_in_flight = False
             raise e
 
 

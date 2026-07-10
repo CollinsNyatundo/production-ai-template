@@ -9,19 +9,45 @@ logger = logging.getLogger("app.services.context_manager")
 
 
 class ContextManager:
+    # NOTE ON ACCURACY: tiktoken only ships real tokenizers for OpenAI models.
+    # The model actually wired up for generation is an NVIDIA-hosted Llama
+    # model (see app.config.settings.nvidia_model), which uses a different
+    # tokenizer entirely. Counting against "gpt-4o" here is a deliberate,
+    # reasonably-conservative proxy for budgeting purposes, not an exact count
+    # for whatever model is actually configured - there is no tiktoken-based
+    # way to get that exactly for a non-OpenAI model.
     def __init__(self, default_model: str = "gpt-4o", default_budget: int = 2000):
         self.default_model = default_model
         self.default_budget = default_budget
         logger.info(f"Context Manager initialized. Model: {default_model}, Budget: {default_budget} tokens")
 
+    def _get_encoding(self, model: str):
+        try:
+            return tiktoken.encoding_for_model(model)
+        except Exception as e:
+            logger.debug(f"No direct tiktoken mapping for model '{model}' ({e}); trying cl100k_base fallback.")
+            try:
+                return tiktoken.get_encoding("cl100k_base")
+            except Exception as e2:
+                # Both lookups failed - most likely no network access to fetch
+                # the BPE file and no pre-warmed cache (see app/Dockerfile for
+                # the build-time fix). Signal the caller to use the character
+                # estimate instead of crashing a budgeting utility.
+                logger.warning(f"tiktoken encodings unavailable ({e2}); falling back to character-based estimate.")
+                return None
+
     def count_tokens(self, text: str, model: Optional[str] = None) -> int:
         model = model or self.default_model
-        try:
-            enc = tiktoken.encoding_for_model(model)
-        except Exception:
-            # Fallback encoding if model name isn't directly mapped in older tiktoken versions
-            enc = tiktoken.get_encoding("cl100k_base")
+        enc = self._get_encoding(model)
+        if enc is None:
+            return self._estimate_tokens_by_chars(text)
         return len(enc.encode(text))
+
+    @staticmethod
+    def _estimate_tokens_by_chars(text: str) -> int:
+        """Rough English-text heuristic (~4 chars/token) used only if tiktoken's
+        encoding files can't be loaded at all (no cache, no network)."""
+        return max(1, len(text) // 4)
 
     async def pack_context(
         self,
@@ -67,11 +93,9 @@ class ContextManager:
         return packed_docs
 
     def _truncate_text_to_tokens(self, text: str, target_tokens: int, model: str) -> str:
-        try:
-            enc = tiktoken.encoding_for_model(model)
-        except Exception:
-            enc = tiktoken.get_encoding("cl100k_base")
-
+        enc = self._get_encoding(model)
+        if enc is None:
+            return text[: target_tokens * 4]
         tokens = enc.encode(text)
         truncated_tokens = tokens[:target_tokens]
         return enc.decode(truncated_tokens)
