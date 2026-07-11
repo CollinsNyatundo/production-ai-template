@@ -12,6 +12,7 @@ each other (or with tests/test_harness.py's real, unmocked calls) regardless
 of execution order.
 """
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -136,3 +137,37 @@ def test_cors_default_is_not_wildcard():
     origins = Settings(_env_file=None).cors_allowed_origins
     assert "*" not in origins
     assert all(o.startswith("http") for o in origins)
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_half_open_serializes_concurrent_probes():
+    """Regression guard for the HALF-OPEN concurrency fix: a burst of concurrent
+    callers arriving right as the breaker becomes eligible for recovery must
+    result in exactly ONE actual downstream call, with the rest fast-failing -
+    not all of them rushing the recovering service at once."""
+    breaker = AsyncCircuitBreaker("ConcurrencyTestBreaker", failure_threshold=1, recovery_timeout=0.1)
+
+    async def failing_call():
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        await breaker.call(failing_call)
+    assert breaker.state == "OPEN"
+    await asyncio.sleep(0.15)  # let recovery_timeout elapse
+
+    call_count = 0
+
+    async def slow_recovering_call():
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.1)
+        return "ok"
+
+    results = await asyncio.gather(
+        *[breaker.call(slow_recovering_call) for _ in range(5)], return_exceptions=True
+    )
+    successes = [r for r in results if r == "ok"]
+
+    assert call_count == 1, f"expected exactly 1 downstream call, got {call_count}"
+    assert len(successes) == 1
+    assert breaker.state == "CLOSED"

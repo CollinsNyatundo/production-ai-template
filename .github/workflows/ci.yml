@@ -42,6 +42,10 @@ jobs:
       run: |
         pytest --cov=app --cov-report=term-missing
 
+    - name: Apply Database Migrations
+      run: |
+        PYTHONPATH=. python scripts/migrate.py upgrade
+
     - name: Execute Quality Evaluation Pipeline
       run: |
         PYTHONPATH=. python evaluation/offline_eval.py
