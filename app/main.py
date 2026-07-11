@@ -14,6 +14,7 @@ from slowapi.util import get_remote_address
 from app.config import settings
 from app.models import QueryRequest, QueryResponse
 from app.security.auth import User, get_current_user
+from app.services.conversation import conversation_service
 from app.services.rag_pipeline import rag_pipeline
 from app.services.state_store import state_store
 from observability.tracer import current_user_context
@@ -64,6 +65,25 @@ app.add_middleware(
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "env": settings.app_env, "timestamp": time.time()}
+
+
+@app.delete("/api/session/{session_id}")
+@limiter.limit(f"{settings.rate_limit_calls}/{settings.rate_limit_period} seconds")
+async def clear_session_endpoint(
+    session_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    # NOTE: session_id is not currently validated as belonging to current_user -
+    # any authenticated caller can clear (or, via /api/query, read) any session_id
+    # they know or guess. This predates this endpoint (the same gap already existed
+    # for reading history) and isn't fixed here; flagging it rather than silently
+    # extending the same gap without comment. A real fix would derive/scope
+    # session_id server-side from the authenticated user rather than trusting a
+    # client-supplied string.
+    logger.info(f"Clearing session '{session_id}' for user '{current_user.username}'")
+    await conversation_service.clear_history(session_id)
+    return {"status": "cleared", "session_id": session_id}
 
 
 @app.post("/api/query", response_model=QueryResponse)

@@ -9,7 +9,6 @@ from app.prompts.templates import (
     QUERY_REWRITE_PROMPT,
     RAG_SYSTEM_PROMPT,
     RERANK_PROMPT,
-    SUMMARY_PROMPT,
 )
 
 logger = logging.getLogger("app.prompts.registry")
@@ -20,7 +19,6 @@ class PromptRegistry:
         # Local fallback cache - always available even with zero external config.
         self._local_prompts: Dict[str, str] = {
             "rag_system_prompt": RAG_SYSTEM_PROMPT,
-            "summary_prompt": SUMMARY_PROMPT,
             "agent_system_prompt": AGENT_SYSTEM_PROMPT,
             "query_rewrite_prompt": QUERY_REWRITE_PROMPT,
             "rerank_prompt": RERANK_PROMPT,

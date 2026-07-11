@@ -16,6 +16,7 @@ from app.security.auth import (
 )
 from app.security.resilience import AsyncCircuitBreaker, CircuitBreakerOpenException
 from app.services.context_manager import context_manager
+from app.services.conversation import conversation_service
 from app.services.hooks import lifecycle_hooks
 from app.services.rag_pipeline import rag_pipeline
 from app.services.state_store import state_store
@@ -182,3 +183,22 @@ async def test_circuit_breaker():
     assert result == "Success"
     assert breaker.state == "CLOSED"
     assert breaker.failure_count == 0
+
+
+@pytest.mark.asyncio
+async def test_conversation_clear_history_actually_clears():
+    """Regression guard for the frontend's Clear Conversation button, which
+    previously called nothing at all and just displayed a fake success
+    message. Verifies the service it now genuinely calls (via
+    DELETE /api/session/{id} in app/main.py) actually empties history."""
+    session_id = "clear-history-test-session"
+    await conversation_service.add_message(session_id, "user", "hello")
+    await conversation_service.add_message(session_id, "assistant", "hi there")
+
+    history_before = await conversation_service.get_history(session_id)
+    assert len(history_before) == 2
+
+    await conversation_service.clear_history(session_id)
+
+    history_after = await conversation_service.get_history(session_id)
+    assert history_after == []

@@ -90,18 +90,9 @@ class RAGPipeline:
             # 4. Query Rewrite (now a real LLM call; see app/services/query_rewriter.py)
             rewritten_query = await query_rewriter.rewrite(payload.query, history_str)
 
-            # 4b. Query Decomposition - logged for observability/trajectory visibility.
-            # Sub-queries aren't yet fanned out into parallel retrieval; that's a
-            # larger control-flow change than this pass covers. See
-            # app/agents/query_decomposer.py.
-            sub_queries = await query_decomposer.decompose(rewritten_query)
-            if len(sub_queries) > 1:
-                span.set_attribute("decomposed_sub_queries", len(sub_queries))
-                logger.info(f"Query decomposed into {len(sub_queries)} sub-questions (not yet parallelized): {sub_queries}")
-
-            # 5. Adaptive Routing - skip the full agent/tool loop for short,
-            # low-complexity conversational input, saving a full tool-calling
-            # round trip's worth of latency and tokens.
+            # 5. Adaptive Routing - skip the full agent/tool loop (and, below,
+            # decomposition) for short, low-complexity conversational input,
+            # saving a full tool-calling round trip's worth of latency and tokens.
             route = await adaptive_router.route_adaptively(rewritten_query)
             span.set_attribute("route", route)
 
@@ -109,9 +100,28 @@ class RAGPipeline:
                 final_answer, raw_trajectory, token_usage = await self._direct_response(rewritten_query)
                 packed_docs = []
             else:
+                # 5b. Query Decomposition: for multi-part questions, surface the
+                # sub-questions directly in what the agent sees rather than just
+                # logging them - otherwise this is a real LLM call (latency + cost)
+                # that changes nothing about the answer. Full parallel per-sub-query
+                # retrieval is a bigger control-flow change than this covers; this
+                # is the cheap middle ground - the single agent loop at least gets
+                # an explicit checklist instead of silently trying to address a
+                # compound question in one pass.
+                sub_queries = await query_decomposer.decompose(rewritten_query)
+                agent_query = rewritten_query
+                if len(sub_queries) > 1:
+                    span.set_attribute("decomposed_sub_queries", len(sub_queries))
+                    logger.info(f"Query decomposed into {len(sub_queries)} sub-questions: {sub_queries}")
+                    checklist = "\n".join(f"- {q}" for q in sub_queries)
+                    agent_query = (
+                        f"{rewritten_query}\n\nThis question has multiple parts - "
+                        f"make sure your answer addresses each of these:\n{checklist}"
+                    )
+
                 run_result = await agent_executor.execute_trajectory(
                     session_id=payload.session_id,
-                    query=rewritten_query,
+                    query=agent_query,
                     actor_permission=payload.actor_permission,
                 )
                 raw_trajectory = run_result["trajectory"]

@@ -4,10 +4,6 @@ If you do not know the answer based on the context, state that you do not know.
 Do not make up facts or hallucinate.
 """
 
-SUMMARY_PROMPT = """Summarize the following text briefly in under two sentences.
-Text: {text}
-"""
-
 AGENT_SYSTEM_PROMPT = """You are a helpful production-grade AI assistant with access to tools.
 
 Use the available tools to gather the information you need before answering. Call at
