@@ -21,7 +21,7 @@ class Reranker:
 
         logger.info(f"Reranking {len(documents)} documents for query: '{query}'")
         try:
-            scores = await llm_breaker.call(self._score_documents, query, documents)
+            scores: List[float] = await llm_breaker.call(self._score_documents, query, documents)
             if len(scores) != len(documents):
                 raise ValueError(f"Expected {len(documents)} scores, got {len(scores)}")
             for doc, score in zip(documents, scores):
@@ -47,7 +47,10 @@ class Reranker:
         match = re.search(r"\[[\d.,\s]*\]", content)
         if not match:
             raise ValueError(f"Could not find a JSON score array in reranker output: {content!r}")
-        return json.loads(match.group(0))
+        parsed = json.loads(match.group(0))
+        if not isinstance(parsed, list):
+            raise ValueError(f"Reranker output was not a JSON array: {content!r}")
+        return [float(x) for x in parsed]
 
 
 reranker = Reranker()

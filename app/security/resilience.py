@@ -1,11 +1,14 @@
 import asyncio
 import logging
 import time
-from typing import Any, Callable
+from typing import Awaitable, Callable, ParamSpec, TypeVar
 
 from app.config import settings
 
 logger = logging.getLogger("app.security.resilience")
+
+P = ParamSpec("P")
+T = TypeVar("T")
 
 
 class CircuitBreakerOpenException(Exception):
@@ -38,7 +41,7 @@ class AsyncCircuitBreaker:
             f"Circuit Breaker '{name}' initialized (threshold={failure_threshold}, timeout={recovery_timeout}s)"
         )
 
-    async def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    async def call(self, func: Callable[P, Awaitable[T]], *args: P.args, **kwargs: P.kwargs) -> T:
         async with self._lock:
             current_time = time.time()
 
@@ -68,10 +71,7 @@ class AsyncCircuitBreaker:
             # else: CLOSED - proceed without serializing
 
         try:
-            if asyncio.iscoroutinefunction(func):
-                result = await func(*args, **kwargs)
-            else:
-                result = func(*args, **kwargs)
+            result = await func(*args, **kwargs)
 
             async with self._lock:
                 if self.state == "HALF-OPEN":

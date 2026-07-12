@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import jwt
 from fastapi import Depends, HTTPException, Security, status
@@ -8,6 +8,7 @@ from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.types import JSONValue
 
 logger = logging.getLogger("app.security.auth")
 
@@ -68,14 +69,14 @@ DEMO_USERS = {
 }
 
 
-def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] = None) -> str:
+def create_access_token(data: Dict[str, JSONValue], expires_delta: Optional[datetime.timedelta] = None) -> str:
     """Generates a signed JWT bearer token."""
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.datetime.now(datetime.UTC) + expires_delta
     else:
         expire = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=15)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": int(expire.timestamp())})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 

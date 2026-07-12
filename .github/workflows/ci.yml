@@ -32,7 +32,7 @@ jobs:
 
     - name: Static Type Validation (Mypy)
       run: |
-        mypy app
+        mypy app evaluation observability scripts tests
 
     - name: Security Vulnerability Scanning (Bandit)
       run: |

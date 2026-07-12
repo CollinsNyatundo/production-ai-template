@@ -15,16 +15,27 @@ of execution order.
 import asyncio
 import json
 from types import SimpleNamespace
+from typing import Dict
 from unittest.mock import AsyncMock
 
 import pytest
+from openai.types.chat import ChatCompletionMessageFunctionToolCall
+from openai.types.chat.chat_completion_message_function_tool_call import Function
 
 from app.agents.executor import agent_executor
 from app.security.resilience import AsyncCircuitBreaker
 
 
-def _fake_tool_call(call_id: str, name: str, arguments: dict):
-    return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=json.dumps(arguments)))
+def _fake_tool_call(call_id: str, name: str, arguments: Dict[str, object]) -> ChatCompletionMessageFunctionToolCall:
+    # A real SDK object, not a loose SimpleNamespace - executor.py narrows
+    # tool_calls with isinstance(call, ChatCompletionMessageFunctionToolCall)
+    # (the SDK's tool_calls type is a union that also includes a "custom tool"
+    # variant we don't support), so a duck-typed fake would fail that check
+    # and silently exercise the wrong code path instead of what these tests
+    # are meant to verify.
+    return ChatCompletionMessageFunctionToolCall(
+        id=call_id, type="function", function=Function(name=name, arguments=json.dumps(arguments))
+    )
 
 
 def _fake_response(content=None, tool_calls=None, prompt_tokens=10, completion_tokens=5):
@@ -171,3 +182,23 @@ async def test_circuit_breaker_half_open_serializes_concurrent_probes():
     assert call_count == 1, f"expected exactly 1 downstream call, got {call_count}"
     assert len(successes) == 1
     assert breaker.state == "CLOSED"
+
+
+def test_session_id_scoped_by_tenant():
+    """Regression guard: two different tenants using the same client-facing
+    session_id string must not collide in storage. Previously the raw
+    client-supplied session_id was used directly as the storage key with no
+    ownership check - any authenticated caller could read or clear any
+    session_id they knew or guessed."""
+    from app.main import _scoped_session_id
+    from app.security.auth import User
+
+    user_a = User(username="alice", role="user", permission_level="low", scopes=["read"], tenant_id="tenant-a")
+    user_b = User(username="bob", role="user", permission_level="low", scopes=["read"], tenant_id="tenant-b")
+
+    scoped_a = _scoped_session_id(user_a, "shared-session-name")
+    scoped_b = _scoped_session_id(user_b, "shared-session-name")
+
+    assert scoped_a != scoped_b
+    assert "tenant-a" in scoped_a
+    assert "tenant-b" in scoped_b

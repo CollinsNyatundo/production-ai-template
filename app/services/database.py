@@ -1,5 +1,4 @@
 import datetime
-from typing import Any, Dict
 
 from sqlalchemy import DateTime, Integer, String, Text, func
 from sqlalchemy.ext.asyncio import (
@@ -11,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.config import settings
+from app.types import EngineKwargs
 
 
 # 1. Base Class definition with Async Attributes support
@@ -52,7 +52,7 @@ elif db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
 
 # Configure connection pooling and optimization parameters
-engine_kwargs: Dict[str, Any] = {"echo": False, "pool_pre_ping": True}
+engine_kwargs: EngineKwargs = {"echo": False, "pool_pre_ping": True}
 
 if "sqlite" in db_url:
     # Ensure SQLite handles simultaneous multi-threading operations safely

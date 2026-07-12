@@ -1,25 +1,47 @@
 import inspect
 import logging
-from typing import Any, Callable, Dict, List
+from typing import Awaitable, Callable, Dict, List, TypedDict, Union
+
+from app.models import SearchDocument
+from app.types import JSONValue, ToolFunctionSchema
 
 logger = logging.getLogger("app.agents.tools.registry")
+
+# The contract every registered tool's func must satisfy. Note this is honest
+# about the *current* actual contract (matches vector_search/web_search/
+# code_search's real signatures) rather than a hypothetical fully-generic one -
+# a registry doing runtime string-keyed dispatch across heterogeneous tools
+# can't preserve per-tool static types the way a single-function wrapper
+# (e.g. AsyncCircuitBreaker.call, see app/security/resilience.py) can with
+# ParamSpec/TypeVar. If a tool needs a genuinely different return shape,
+# this Union should grow to include it explicitly.
+ToolFunc = Callable[..., Awaitable[List[SearchDocument]]]
+
+
+class RegisteredTool(TypedDict):
+    name: str
+    description: str
+    func: ToolFunc
+    required_permission: str
+    schema: ToolFunctionSchema
 
 
 class ToolRegistry:
     def __init__(self):
-        self._tools: Dict[str, Dict[str, Any]] = {}
+        self._tools: Dict[str, RegisteredTool] = {}
         logger.info("Initializing Agentic Tool Registry...")
 
     def register_tool(
         self,
         name: str,
         description: str,
-        func: Callable,
+        func: ToolFunc,
         required_permission: str = "low",
     ) -> None:
         # Introspect function parameters to generate JSON schemas automatically
         sig = inspect.signature(func)
-        parameters: Dict[str, Any] = {"type": "object", "properties": {}, "required": []}
+        properties: Dict[str, JSONValue] = {}
+        required: List[JSONValue] = []
 
         for param_name, param in sig.parameters.items():
             # Skip self parameter if it is a class method
@@ -35,12 +57,14 @@ class ToolRegistry:
             elif param.annotation is bool:
                 param_type = "boolean"
 
-            parameters["properties"][param_name] = {
+            properties[param_name] = {
                 "type": param_type,
                 "description": f"The {param_name} parameter.",
             }
             if param.default == inspect.Parameter.empty:
-                parameters["required"].append(param_name)
+                required.append(param_name)
+
+        parameters: Dict[str, JSONValue] = {"type": "object", "properties": properties, "required": required}
 
         self._tools[name] = {
             "name": name,
@@ -55,10 +79,12 @@ class ToolRegistry:
         }
         logger.info(f"Registered tool: '{name}' (Permission required: {required_permission})")
 
-    def get_tool_schemas(self) -> List[Dict[str, Any]]:
+    def get_tool_schemas(self) -> List[ToolFunctionSchema]:
         return [t["schema"] for t in self._tools.values()]
 
-    async def execute_tool(self, name: str, args: Dict[str, Any], actor_permission: str = "low") -> Any:
+    async def execute_tool(
+        self, name: str, args: Dict[str, JSONValue], actor_permission: str = "low"
+    ) -> Union[str, List[SearchDocument]]:
         logger.info(f"Executing tool '{name}' with args {args}")
 
         tool = self._tools.get(name)
@@ -68,17 +94,12 @@ class ToolRegistry:
         # Permission Gating logic (T - Pitfall Mitigation)
         required_perm = tool["required_permission"]
         if required_perm == "high" and actor_permission != "high":
-            # Simulate rejection or request for user-in-the-loop authorization
             logger.warning(f"BLOCKED: Tool '{name}' requires high permission. Actor has '{actor_permission}'")
             return f"Error: Execution blocked. Tool '{name}' requires high level permissions. Please confirm."
 
         # Execute
         try:
-            func = tool["func"]
-            if inspect.iscoroutinefunction(func):
-                result = await func(**args)
-            else:
-                result = func(**args)
+            result = await tool["func"](**args)
             logger.info(f"Tool '{name}' executed successfully.")
             return result
         except Exception as e:

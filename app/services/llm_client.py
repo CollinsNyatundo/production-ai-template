@@ -15,12 +15,13 @@ behavior belongs - this module does not swallow errors or return fake data.
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
 from app.config import settings
+from app.types import ChatMessage, ToolFunctionSchema, ToolSchema
 
 logger = logging.getLogger("app.services.llm_client")
 
@@ -81,8 +82,8 @@ class LLMClient:
 
     async def chat(
         self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
+        messages: List[ChatMessage],
+        tools: Optional[List[ToolSchema]] = None,
         tool_choice: Optional[str] = None,
         temperature: float = 0.2,
         max_tokens: int = 1024,
@@ -92,20 +93,30 @@ class LLMClient:
                 "NVIDIA_API_KEY is not configured. Set it in .env to enable real LLM calls."
             )
 
-        kwargs: Dict[str, Any] = {
-            "model": settings.nvidia_model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
+        # openai's SDK types `messages`/`tools` as a discriminated union of
+        # per-role/per-tool-type TypedDicts (far more granular than needed here);
+        # our ChatMessage/ToolSchema are intentionally the looser wire-format
+        # shape shared across all providers speaking this protocol. Structurally
+        # identical at the JSON level the API actually consumes - this is a
+        # single, narrow suppression at the SDK boundary, not a blanket Any.
         if tools:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = tool_choice or "auto"
-
-        return await self._client.chat.completions.create(**kwargs)
+            return await self._client.chat.completions.create(  # type: ignore[call-overload, arg-type, no-any-return]
+                model=settings.nvidia_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tools=tools,
+                tool_choice=tool_choice or "auto",
+            )
+        return await self._client.chat.completions.create(
+            model=settings.nvidia_model,
+            messages=messages,  # type: ignore[arg-type]
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
     @staticmethod
-    def tool_registry_schemas_to_openai_tools(schemas: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def tool_registry_schemas_to_openai_tools(schemas: List[ToolFunctionSchema]) -> List[ToolSchema]:
         """Adapts ToolRegistry.get_tool_schemas() output to the OpenAI/NVIDIA `tools` format."""
         return [{"type": "function", "function": schema} for schema in schemas]
 

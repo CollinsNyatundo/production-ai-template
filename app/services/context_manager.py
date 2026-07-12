@@ -98,7 +98,7 @@ class ContextManager:
             return text[: target_tokens * 4]
         tokens = enc.encode(text)
         truncated_tokens = tokens[:target_tokens]
-        return enc.decode(truncated_tokens)
+        return str(enc.decode(truncated_tokens))
 
 
 context_manager = ContextManager()

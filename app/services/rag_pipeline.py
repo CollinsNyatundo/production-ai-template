@@ -1,7 +1,9 @@
 import logging
 import time
+from typing import List, Tuple
 
 from langsmith import traceable
+from openai.types.chat import ChatCompletion
 
 from app.agents.adaptive_router import adaptive_router
 from app.agents.executor import agent_executor
@@ -23,6 +25,7 @@ from app.services.hooks import lifecycle_hooks
 from app.services.llm_client import llm_client
 from app.services.query_rewriter import query_rewriter
 from app.services.semantic_cache import semantic_cache
+from app.types import AgentTrajectoryStep, TokenUsage
 from evaluation.trajectory_logger import trajectory_logger
 from observability.cost_tracker import cost_tracker
 from observability.tracer import tracer
@@ -51,7 +54,7 @@ tool_registry.register_tool(
 
 
 # Example Lifecycle Hooks Subscriber (L - Gap Mitigation)
-def audit_logger(session_id: str, **kwargs):
+def audit_logger(session_id: str, **kwargs: object) -> None:
     logger.info(f"[Lifecycle Hook AUDIT] Session: {session_id} - Logged Event Args: {list(kwargs.keys())}")
 
 
@@ -187,12 +190,12 @@ class RAGPipeline:
                 trajectory=pydantic_trajectory,
             )
 
-    async def _direct_response(self, query: str) -> "tuple[str, list, dict]":
+    async def _direct_response(self, query: str) -> Tuple[str, List[AgentTrajectoryStep], TokenUsage]:
         """Single LLM call, no tools, no retrieval - for adaptive_router's fast path."""
         system_prompt = await prompt_registry.get_prompt("rag_system_prompt")
-        token_usage = {"prompt_tokens": 0, "completion_tokens": 0}
+        token_usage: TokenUsage = {"prompt_tokens": 0, "completion_tokens": 0}
         try:
-            response = await llm_breaker.call(
+            response: ChatCompletion = await llm_breaker.call(
                 llm_client.chat,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -210,8 +213,14 @@ class RAGPipeline:
             logger.error(f"LLM unavailable for direct response: {e}")
             answer = "I'm temporarily unable to reach the language model. Please try again shortly."
 
-        trajectory = [
-            {"turn": 1, "thought": "Routed to direct response (short/simple query).", "tool": None, "arguments": {}, "observation": ""}
+        trajectory: List[AgentTrajectoryStep] = [
+            {
+                "turn": 1,
+                "thought": "Routed to direct response (short/simple query).",
+                "tool": None,
+                "arguments": {},
+                "observation": "",
+            }
         ]
         return answer, trajectory, token_usage
 
