@@ -8,19 +8,27 @@ import sys
 # Ensure python path is set correctly
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from typing import Dict, List, Sequence
+
 from app.models import QueryRequest
 from app.security.auth import User
 from app.services.rag_pipeline import rag_pipeline
+from app.types import JSONValue
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("evaluation.offline_eval")
 
 
-def evaluate_answer_and_trajectory(query: str, answer: str, trajectory: list, case_data: dict) -> dict:
+def evaluate_answer_and_trajectory(
+    query: str, answer: str, trajectory: Sequence[object], case_data: Dict[str, JSONValue]
+) -> Dict[str, JSONValue]:
     """Helper to evaluate a specific answer and its execution trajectory against gold standards."""
     answer_lower = answer.lower()
-    expected_concepts = case_data.get("expected_concepts", [])
-    matched_concepts = []
+    expected_concepts_raw = case_data.get("expected_concepts", [])
+    expected_concepts: List[str] = (
+        [c for c in expected_concepts_raw if isinstance(c, str)] if isinstance(expected_concepts_raw, list) else []
+    )
+    matched_concepts: List[str] = []
 
     # Calculate concept recall
     for concept in expected_concepts:
@@ -30,14 +38,17 @@ def evaluate_answer_and_trajectory(query: str, answer: str, trajectory: list, ca
     concept_recall = len(matched_concepts) / len(expected_concepts) if expected_concepts else 1.0
 
     # Extract executed tools from trajectory steps
-    executed_tools = []
+    executed_tools: List[str] = []
     for step in trajectory:
         # Support both Pydantic model items and raw dictionaries
-        tool = getattr(step, "tool", None) or (step.get("tool") if isinstance(step, dict) else None)
-        if tool:
+        tool = getattr(step, "tool", None)
+        if tool is None and isinstance(step, dict):
+            tool = step.get("tool")
+        if isinstance(tool, str):
             executed_tools.append(tool)
 
-    min_score = case_data.get("min_faithfulness_score", 0.80)
+    min_score_raw = case_data.get("min_faithfulness_score", 0.80)
+    min_score = float(min_score_raw) if isinstance(min_score_raw, (int, float)) else 0.80
     passed = concept_recall >= min_score
 
     return {
@@ -49,7 +60,7 @@ def evaluate_answer_and_trajectory(query: str, answer: str, trajectory: list, ca
     }
 
 
-async def run_active_evaluation(test_cases: list) -> list:
+async def run_active_evaluation(test_cases: "list[dict[str, JSONValue]]") -> "list[dict[str, JSONValue]]":
     """Executes fresh queries through the pipeline and evaluates them."""
     results = []
 
@@ -58,11 +69,16 @@ async def run_active_evaluation(test_cases: list) -> list:
     )
 
     for case in test_cases:
-        logger.info(f"Evaluating Case {case['id']}: '{case['query']}'")
+        case_id = case.get("id")
+        case_query = case.get("query")
+        if not isinstance(case_query, str):
+            logger.error(f"Skipping case with non-string or missing 'query': {case!r}")
+            continue
+        logger.info(f"Evaluating Case {case_id}: '{case_query}'")
 
         payload = QueryRequest(
-            query=case["query"],
-            session_id=f"eval-session-{case['id']}",
+            query=case_query,
+            session_id=f"eval-session-{case_id}",
             use_cache=False,
             actor_permission=mock_user.permission_level,
         )
@@ -73,8 +89,8 @@ async def run_active_evaluation(test_cases: list) -> list:
 
             results.append(
                 {
-                    "id": case["id"],
-                    "query": case["query"],
+                    "id": case_id,
+                    "query": case_query,
                     "answer": response.answer,
                     "expected_concepts": case.get("expected_concepts", []),
                     "matched_concepts": eval_metrics["matched_concepts"],
@@ -90,21 +106,21 @@ async def run_active_evaluation(test_cases: list) -> list:
 
             if not eval_metrics["passed"]:
                 logger.error(
-                    f"Case {case['id']} FAILED: Recall {eval_metrics['concept_recall']:.2f} < Threshold {eval_metrics['target_threshold']:.2f}"
+                    f"Case {case_id} FAILED: Recall {eval_metrics['concept_recall']:.2f} < Threshold {eval_metrics['target_threshold']:.2f}"
                 )
             else:
                 logger.info(
-                    f"Case {case['id']} PASSED: Recall {eval_metrics['concept_recall']:.2f} >= Threshold {eval_metrics['target_threshold']:.2f}"
+                    f"Case {case_id} PASSED: Recall {eval_metrics['concept_recall']:.2f} >= Threshold {eval_metrics['target_threshold']:.2f}"
                 )
 
         except Exception as e:
-            logger.exception(f"Exception during evaluation of case {case['id']}")
-            results.append({"id": case["id"], "query": case["query"], "error": str(e), "passed": False})
+            logger.exception(f"Exception during evaluation of case {case_id}")
+            results.append({"id": case_id, "query": case_query, "error": str(e), "passed": False})
 
     return results
 
 
-def run_historical_evaluation(test_cases: list) -> list:
+def run_historical_evaluation(test_cases: "list[dict[str, JSONValue]]") -> "list[dict[str, JSONValue]]":
     """Parses historical JSONL trajectories and computes evaluation metrics post-hoc."""
     logger.info("Starting evaluation over historical JSONL trajectories...")
     results = []
@@ -115,7 +131,9 @@ def run_historical_evaluation(test_cases: list) -> list:
         return []
 
     # Map test cases by query keywords for fuzzy matching
-    case_map = {case["query"].lower(): case for case in test_cases}
+    case_map: Dict[str, Dict[str, JSONValue]] = {
+        q.lower(): case for case in test_cases if isinstance(q := case.get("query"), str)
+    }
 
     with open(trajectory_file, "r") as f:
         for line_num, line in enumerate(f, 1):

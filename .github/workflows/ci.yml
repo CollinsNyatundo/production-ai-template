@@ -32,7 +32,7 @@ jobs:
 
     - name: Static Type Validation (Mypy)
       run: |
-        mypy app
+        mypy app evaluation observability scripts tests
 
     - name: Security Vulnerability Scanning (Bandit)
       run: |
@@ -41,6 +41,10 @@ jobs:
     - name: Run Test Suite (Pytest)
       run: |
         pytest --cov=app --cov-report=term-missing
+
+    - name: Apply Database Migrations
+      run: |
+        PYTHONPATH=. python scripts/migrate.py upgrade
 
     - name: Execute Quality Evaluation Pipeline
       run: |

@@ -42,8 +42,42 @@ st.sidebar.header("Configuration")
 session_id = st.sidebar.text_input("Session ID", value="prod-session-001")
 use_cache = st.sidebar.checkbox("Enable Semantic Cache", value=True)
 
+# API key: pre-filled from FRONTEND_API_KEY env var if the operator set one
+# (e.g. via docker-compose), otherwise left blank. Previously this UI sent no
+# credentials at all and only worked because of the backend's dev-mode
+# unauthenticated-admin fallback - if that's ever locked down for a real
+# deployment, an unauthenticated UI breaks with 401s on every request.
+api_key = st.sidebar.text_input(
+    "API Key",
+    value=os.getenv("FRONTEND_API_KEY", ""),
+    type="password",
+    help="X-API-Key sent with every request. Leave blank to rely on the backend's "
+    "dev-mode fallback (only works when the backend is running with APP_ENV=development).",
+)
+if api_key:
+    st.sidebar.success("🔑 Authenticated requests")
+else:
+    st.sidebar.warning("⚠️ No API key set - relying on backend dev-mode fallback")
+
+
+def _headers() -> dict:
+    return {"X-API-Key": api_key} if api_key else {}
+
+
 if st.sidebar.button("Clear Conversation"):
-    st.sidebar.success("Memory cleared (Mock action)")
+    try:
+        with httpx.Client() as client:
+            clear_response = client.delete(
+                f"{BACKEND_API_URL}/api/session/{session_id}",
+                headers=_headers(),
+                timeout=10.0,
+            )
+        if clear_response.status_code == 200:
+            st.sidebar.success("Conversation history cleared.")
+        else:
+            st.sidebar.error(f"Failed to clear ({clear_response.status_code}): {clear_response.text}")
+    except Exception as e:
+        st.sidebar.error(f"Failed to reach backend: {e}")
 
 # Query input
 query_input = st.text_input(
@@ -58,6 +92,7 @@ if query_input:
             with httpx.Client() as client:
                 response = client.post(
                     f"{BACKEND_API_URL}/api/query",
+                    headers=_headers(),
                     json={
                         "query": query_input,
                         "session_id": session_id,
@@ -105,6 +140,8 @@ if query_input:
                             st.write(src.get("content"))
                 else:
                     st.warning("No context sources were retrieved or needed.")
+            elif response.status_code == 401:
+                st.error("401 Unauthorized - set a valid API Key in the sidebar (see DEMO_API_KEYS in app/security/auth.py for local testing).")
             else:
                 st.error(f"Error {response.status_code}: {response.text}")
 

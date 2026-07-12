@@ -16,17 +16,10 @@ from app.security.auth import (
 )
 from app.security.resilience import AsyncCircuitBreaker, CircuitBreakerOpenException
 from app.services.context_manager import context_manager
+from app.services.conversation import conversation_service
 from app.services.hooks import lifecycle_hooks
 from app.services.rag_pipeline import rag_pipeline
 from app.services.state_store import state_store
-
-
-# Autouse session fixture to initialize database tables before tests run
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_db():
-    import asyncio
-
-    asyncio.run(state_store.initialize_tables())
 
 
 @pytest.mark.asyncio
@@ -62,9 +55,13 @@ async def test_tool_registry_permissions():
     res_blocked = await tool_registry.execute_tool("code_search", {"query": "config"}, actor_permission="low")
     assert "blocked" in res_blocked.lower()
 
-    # Executing with high permission actor should succeed
+    # Executing with high permission actor should succeed and return a real match
+    # from the actual repository source tree (code_search.py now genuinely greps
+    # app/ rather than returning one hardcoded snippet).
     res_success = await tool_registry.execute_tool("code_search", {"query": "config"}, actor_permission="high")
-    assert "settings" in res_success[0].content.lower()
+    assert len(res_success) > 0
+    assert "config" in res_success[0].content.lower()
+    assert res_success[0].metadata["source"]  # a real relative file path, not a hardcoded placeholder
 
 
 @pytest.mark.asyncio
@@ -186,3 +183,22 @@ async def test_circuit_breaker():
     assert result == "Success"
     assert breaker.state == "CLOSED"
     assert breaker.failure_count == 0
+
+
+@pytest.mark.asyncio
+async def test_conversation_clear_history_actually_clears():
+    """Regression guard for the frontend's Clear Conversation button, which
+    previously called nothing at all and just displayed a fake success
+    message. Verifies the service it now genuinely calls (via
+    DELETE /api/session/{id} in app/main.py) actually empties history."""
+    session_id = "clear-history-test-session"
+    await conversation_service.add_message(session_id, "user", "hello")
+    await conversation_service.add_message(session_id, "assistant", "hi there")
+
+    history_before = await conversation_service.get_history(session_id)
+    assert len(history_before) == 2
+
+    await conversation_service.clear_history(session_id)
+
+    history_after = await conversation_service.get_history(session_id)
+    assert history_after == []

@@ -1,6 +1,8 @@
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+from app.types import JSONValue
 
 
 class QueryRequest(BaseModel):
@@ -15,7 +17,7 @@ class QueryRequest(BaseModel):
 
 class SearchDocument(BaseModel):
     content: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, JSONValue] = Field(default_factory=dict)
     score: float = 0.0
 
 
@@ -23,7 +25,7 @@ class AgentStep(BaseModel):
     turn: int
     thought: str
     tool: Optional[str] = None
-    arguments: Dict[str, Any] = Field(default_factory=dict)
+    arguments: Dict[str, JSONValue] = Field(default_factory=dict)
     observation: str
 
 

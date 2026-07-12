@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import jwt
 from fastapi import Depends, HTTPException, Security, status
@@ -8,6 +8,7 @@ from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.types import JSONValue
 
 logger = logging.getLogger("app.security.auth")
 
@@ -28,8 +29,11 @@ class User(BaseModel):
     tenant_id: str = "default-tenant"
 
 
-# Mock database of API keys for validation (Production design pattern)
-MOCK_API_KEYS = {
+# EXAMPLE credentials only - replace with a real user/API-key store (DB table,
+# IdP, secrets manager) before using this outside local development. The
+# admin key below is published in this repo's README as a curl example;
+# treat it as compromised by definition and never reuse it anywhere real.
+DEMO_API_KEYS = {
     "api-key-admin-12345": User(
         username="admin_user",
         role="admin",
@@ -46,8 +50,8 @@ MOCK_API_KEYS = {
     ),
 }
 
-# Mock database of credentials for standard OAuth token exchange
-MOCK_USERS = {
+# EXAMPLE credentials for the standard OAuth token-exchange path - same caveat as above.
+DEMO_USERS = {
     "admin": User(
         username="admin",
         role="admin",
@@ -65,14 +69,14 @@ MOCK_USERS = {
 }
 
 
-def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] = None) -> str:
+def create_access_token(data: Dict[str, JSONValue], expires_delta: Optional[datetime.timedelta] = None) -> str:
     """Generates a signed JWT bearer token."""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.datetime.utcnow() + expires_delta
+        expire = datetime.datetime.now(datetime.UTC) + expires_delta
     else:
-        expire = datetime.datetime.utcnow() + datetime.timedelta(minutes=15)
-    to_encode.update({"exp": expire})
+        expire = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=15)
+    to_encode.update({"exp": int(expire.timestamp())})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -87,7 +91,7 @@ async def get_current_user(
     """
     # 1. API Key Authentication Check (Standard for service-to-service AI calls)
     if api_key and isinstance(api_key, str):
-        user = MOCK_API_KEYS.get(api_key)
+        user = DEMO_API_KEYS.get(api_key)
         if user:
             logger.info(f"Authenticated user '{user.username}' via API Key (Tenant: {user.tenant_id})")
             return user
@@ -107,7 +111,7 @@ async def get_current_user(
             username = sub
 
             # Fetch user profile from database
-            user = MOCK_USERS.get(username)
+            user = DEMO_USERS.get(username)
             if user is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,

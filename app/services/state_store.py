@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import delete, select
 
@@ -11,6 +11,7 @@ from app.services.database import (
     async_session,
     engine,
 )
+from app.types import AgentCheckpointState, AgentTrajectoryStep, CheckpointRecord
 
 logger = logging.getLogger("app.services.state_store")
 
@@ -57,8 +58,8 @@ class StateStore:
         self,
         session_id: str,
         current_step: int,
-        state: Dict[str, Any],
-        trajectory: List[Dict[str, Any]],
+        state: AgentCheckpointState,
+        trajectory: List[AgentTrajectoryStep],
     ) -> None:
         logger.info(f"Saving agent checkpoint step {current_step} for session '{session_id}'")
         async with async_session() as session:
@@ -84,7 +85,7 @@ class StateStore:
                     )
                     session.add(checkpoint)
 
-    async def load_checkpoint(self, session_id: str) -> Optional[Dict[str, Any]]:
+    async def load_checkpoint(self, session_id: str) -> Optional[CheckpointRecord]:
         logger.info(f"Loading agent checkpoint snapshot for session '{session_id}'")
         async with async_session() as session:
             stmt = select(AgentCheckpoint).where(AgentCheckpoint.session_id == session_id)

@@ -1,31 +1,33 @@
 import logging
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Any, Dict, Optional
+from typing import AsyncIterator, Dict, Optional
+
+from app.types import OTelAttributeValue, UserContext
 
 logger = logging.getLogger("app.observability.tracer")
 
 # ContextVar to store tenant and user metadata for automatic trace propagation (S - Pattern)
-current_user_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar("current_user_context", default=None)
+current_user_context: ContextVar[Optional[UserContext]] = ContextVar("current_user_context", default=None)
 
 
 class MockSpan:
-    def __init__(self, name: str, attributes: Optional[Dict[str, Any]] = None):
+    def __init__(self, name: str, attributes: Optional[Dict[str, OTelAttributeValue]] = None):
         self.name = name
-        self.attributes = attributes or {}
+        self.attributes: Dict[str, OTelAttributeValue] = attributes or {}
         # Automatically enrich spans with current contextvar metadata if present
         ctx = current_user_context.get()
         if ctx:
             self.attributes.update(
                 {
-                    "tenant.id": ctx.get("tenant_id"),
-                    "user.id": ctx.get("username"),
-                    "user.role": ctx.get("role"),
+                    "tenant.id": ctx["tenant_id"],
+                    "user.id": ctx["username"],
+                    "user.role": ctx["role"],
                     "app.env": ctx.get("app_env", "production"),
                 }
             )
 
-    def set_attribute(self, key: str, value: Any) -> None:
+    def set_attribute(self, key: str, value: OTelAttributeValue) -> None:
         self.attributes[key] = value
         logger.info(f"Span '{self.name}' Attribute Set: {key}={value}")
 
@@ -35,7 +37,9 @@ class Tracer:
         logger.info("Initializing OpenTelemetry Tracer Adapter...")
 
     @asynccontextmanager
-    async def span(self, name: str, attributes: Optional[Dict[str, Any]] = None):
+    async def span(
+        self, name: str, attributes: Optional[Dict[str, OTelAttributeValue]] = None
+    ) -> AsyncIterator[MockSpan]:
         logger.info(f"==> Trace Span START: '{name}'")
         span_obj = MockSpan(name, attributes)
 

@@ -1,14 +1,17 @@
 import asyncio
 import logging
-from typing import Any, Callable, Dict, List
+from typing import Callable, Dict, List
 
 logger = logging.getLogger("app.services.hooks")
 
 
 class LifecycleHooks:
     def __init__(self):
-        # Dictionary mapping event names to list of subscriber callbacks
-        self._subscribers: Dict[str, List[Callable[..., Any]]] = {
+        # Dictionary mapping event names to list of subscriber callbacks.
+        # Callback return values are never used (fire-and-forget pub/sub), so
+        # `object` (not Any) is correct here: it accepts any return type while
+        # still preventing us from accidentally relying on one.
+        self._subscribers: Dict[str, List[Callable[..., object]]] = {
             "on_agent_start": [],
             "on_tool_execute": [],
             "on_llm_call": [],
@@ -17,13 +20,17 @@ class LifecycleHooks:
         }
         logger.info("Initializing Lifecycle Hooks Registry...")
 
-    def register(self, event: str, callback: Callable[..., Any]) -> None:
+    def register(self, event: str, callback: Callable[..., object]) -> None:
         if event not in self._subscribers:
             self._subscribers[event] = []
         self._subscribers[event].append(callback)
         logger.info(f"Registered subscriber for lifecycle event: '{event}'")
 
-    async def emit(self, event: str, **kwargs: Any) -> None:
+    async def emit(self, event: str, **kwargs: object) -> None:
+        # kwargs are genuinely heterogeneous across call sites (session_id: str,
+        # step: int, error: Exception, args: dict, ...) - object is the honest
+        # type for "accepts anything," not Any, since subscribers still have to
+        # narrow before using a specific field's type.
         logger.info(f"Emitting lifecycle event: '{event}' (Args: {list(kwargs.keys())})")
         callbacks = self._subscribers.get(event, [])
 
