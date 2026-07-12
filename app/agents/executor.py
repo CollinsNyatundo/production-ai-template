@@ -258,7 +258,9 @@ class AgentExecutor:
             docs = await document_grader.grade_documents(query_arg, docs)
         docs = await context_manager.pack_context(docs, token_budget=PER_TOOL_CALL_TOKEN_BUDGET)
 
-        observation = "\n".join(f"[{d.metadata.get('source', 'unknown')}] {d.content}" for d in docs) or "No results found."
+        observation = (
+            "\n".join(f"[{d.metadata.get('source', 'unknown')}] {d.content}" for d in docs) or "No results found."
+        )
         return observation, docs
 
 

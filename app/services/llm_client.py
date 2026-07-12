@@ -65,9 +65,7 @@ class LLMClient:
                 from langsmith.wrappers import wrap_openai
 
                 raw_client = wrap_openai(raw_client)
-                logger.info(
-                    f"LangSmith tracing enabled for LLM calls (project='{settings.langsmith_project}')"
-                )
+                logger.info(f"LangSmith tracing enabled for LLM calls (project='{settings.langsmith_project}')")
             self._client = raw_client
             logger.info(
                 f"LLM client initialized: NVIDIA NIM, model='{settings.nvidia_model}', "
@@ -89,9 +87,7 @@ class LLMClient:
         max_tokens: int = 1024,
     ) -> ChatCompletion:
         if not self._configured or self._client is None:
-            raise LLMNotConfiguredError(
-                "NVIDIA_API_KEY is not configured. Set it in .env to enable real LLM calls."
-            )
+            raise LLMNotConfiguredError("NVIDIA_API_KEY is not configured. Set it in .env to enable real LLM calls.")
 
         # openai's SDK types `messages`/`tools` as a discriminated union of
         # per-role/per-tool-type TypedDicts (far more granular than needed here);

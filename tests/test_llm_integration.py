@@ -78,7 +78,9 @@ async def test_agent_executor_forces_answer_on_final_turn(monkeypatch):
     always_wants_tool = _fake_response(tool_calls=[_fake_tool_call("call_x", "vector_search", {"query": "x"})])
     final_forced_answer = _fake_response(content="Best answer I can give with what I have.")
 
-    mock_chat = AsyncMock(side_effect=[always_wants_tool, always_wants_tool, always_wants_tool, always_wants_tool, final_forced_answer])
+    mock_chat = AsyncMock(
+        side_effect=[always_wants_tool, always_wants_tool, always_wants_tool, always_wants_tool, final_forced_answer]
+    )
     monkeypatch.setattr("app.agents.executor.llm_client.chat", mock_chat)
     monkeypatch.setattr("app.agents.executor.llm_breaker", AsyncCircuitBreaker("IsolatedTestBreaker2"))
 
@@ -102,7 +104,9 @@ async def test_agent_executor_degrades_gracefully_on_repeated_llm_failure(monkey
     raising, both before and after the breaker actually trips."""
     test_breaker = AsyncCircuitBreaker("IsolatedFailureBreaker", failure_threshold=2, recovery_timeout=60)
     monkeypatch.setattr("app.agents.executor.llm_breaker", test_breaker)
-    monkeypatch.setattr("app.agents.executor.llm_client.chat", AsyncMock(side_effect=RuntimeError("simulated upstream 500")))
+    monkeypatch.setattr(
+        "app.agents.executor.llm_client.chat", AsyncMock(side_effect=RuntimeError("simulated upstream 500"))
+    )
 
     result = await agent_executor.execute_trajectory("failing-llm-session", "test query", actor_permission="low")
 
@@ -174,9 +178,7 @@ async def test_circuit_breaker_half_open_serializes_concurrent_probes():
         await asyncio.sleep(0.1)
         return "ok"
 
-    results = await asyncio.gather(
-        *[breaker.call(slow_recovering_call) for _ in range(5)], return_exceptions=True
-    )
+    results = await asyncio.gather(*[breaker.call(slow_recovering_call) for _ in range(5)], return_exceptions=True)
     successes = [r for r in results if r == "ok"]
 
     assert call_count == 1, f"expected exactly 1 downstream call, got {call_count}"
