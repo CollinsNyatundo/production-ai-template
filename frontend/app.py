@@ -141,7 +141,9 @@ if query_input:
                 else:
                     st.warning("No context sources were retrieved or needed.")
             elif response.status_code == 401:
-                st.error("401 Unauthorized - set a valid API Key in the sidebar (see DEMO_API_KEYS in app/security/auth.py for local testing).")
+                st.error(
+                    "401 Unauthorized - set a valid API Key in the sidebar (see DEMO_API_KEYS in app/security/auth.py for local testing)."
+                )
             else:
                 st.error(f"Error {response.status_code}: {response.text}")
 

@@ -48,16 +48,13 @@ class AsyncCircuitBreaker:
             if self.state == "OPEN":
                 if current_time - self.last_failure_time >= self.recovery_timeout:
                     logger.warning(
-                        f"Circuit Breaker '{self.name}' transitioning from OPEN to HALF-OPEN "
-                        "(recovery timeout expired)"
+                        f"Circuit Breaker '{self.name}' transitioning from OPEN to HALF-OPEN (recovery timeout expired)"
                     )
                     self.state = "HALF-OPEN"
                     self._half_open_probe_in_flight = True
                 else:
                     logger.error(f"Circuit Breaker '{self.name}' is OPEN. Fast-failing execution.")
-                    raise CircuitBreakerOpenException(
-                        f"Circuit Breaker '{self.name}' is currently OPEN. Call blocked."
-                    )
+                    raise CircuitBreakerOpenException(f"Circuit Breaker '{self.name}' is currently OPEN. Call blocked.")
             elif self.state == "HALF-OPEN":
                 if self._half_open_probe_in_flight:
                     logger.warning(

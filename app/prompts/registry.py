@@ -26,9 +26,7 @@ class PromptRegistry:
         self._langsmith_client: Optional[Client] = None
         if settings.langsmith_api_key:
             try:
-                self._langsmith_client = Client(
-                    api_key=settings.langsmith_api_key, api_url=settings.langsmith_endpoint
-                )
+                self._langsmith_client = Client(api_key=settings.langsmith_api_key, api_url=settings.langsmith_endpoint)
             except Exception as e:  # pragma: no cover - defensive, SDK/network issues
                 logger.warning(f"Could not initialize LangSmith client for prompt hub: {e}")
         logger.info("Initializing Prompt Registry (LangSmith Prompt Hub, local fallback)...")
