@@ -1,7 +1,7 @@
 # production-ai-template
 
 <p align="center">
-  <img src="./assets/banner.png" alt="production-ai-template — agent trace: 19 tests passed, mypy clean on 51 files, real tool-calling trajectory, circuit breaker states" width="900"/>
+  <img src="./assets/banner.png" alt="production-ai-template request-lifecycle architecture diagram: FastAPI entry, pipeline stages, agent loop with tool registry, response path, and the circuit breaker / state store / observability infrastructure underneath" width="900"/>
 </p>
 
 <p align="center">
