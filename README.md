@@ -1,46 +1,56 @@
-# Production-Ready AI Application Template
+# production-ai-template
 
 <p align="center">
-  <img src="./assets/codebase_preview.png" alt="Production AI Harness Template Cover" width="800"/>
+  <img src="./assets/banner.png" alt="production-ai-template — agent trace: 19 tests passed, mypy clean on 51 files, real tool-calling trajectory, circuit breaker states" width="900"/>
 </p>
 
-This repository is a template for building AI/LLM applications with the production
-infrastructure (auth, resilience, tracing, evaluation, CI/CD) already wired in. It's
-organized around a **9-layer architecture** and a six-component harness taxonomy,
+<p align="center">
+  <a href="https://github.com/CollinsNyatundo/production-ai-template/actions/workflows/ci.yml"><img src="https://github.com/CollinsNyatundo/production-ai-template/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-4ADE80.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/mypy-strict%2C%20zero%20Any-4ADE80.svg" alt="mypy strict, zero Any">
+</p>
+
+A template for building AI agent backends where the infrastructure around the model is
+actually real: LLM tool-calling with circuit-breaker resilience, an async state store,
+strict typing enforced in CI (zero `Any` anywhere in the codebase - see `app/types.py`),
+tenant-scoped sessions, and a test suite that mocks only at the LLM client boundary,
+not throughout the application.
+
+It's organized around a **9-layer architecture** and a six-component harness taxonomy,
 $\mathcal{H} = (E, T, C, S, L, V)$ - execution loop, tools, context, state, lifecycle
 hooks, and evaluation - which tracks recent (2025-2026) LLM-agent-engineering literature
 proposing this kind of decomposition. That literature is young and not yet standardized
 across sources, so treat the six-letter framing as one useful lens, not a settled
 industry standard.
 
-It addresses common pitfalls in early-stage AI prototypes - hardcoded prompts, no
-context-window budgeting, no resilience around LLM/tool calls, no real evaluation - by
-building real infrastructure for each. See **Status** below for what's genuinely wired
-to a live LLM versus still example data.
+See **Status** below for the one honest gap: retrieval runs against example documents
+until you point `hybrid_retriever.py` at a real vector database - everything else in
+this list is live.
 
 ---
 
 ## Status: what's real vs. what's still example data
 
-Everything in this list makes a real, live call to NVIDIA's OpenAI-compatible API
+Everything below makes a real, live call to NVIDIA's OpenAI-compatible API
 (`app/services/llm_client.py`) - agent tool-selection, final-answer generation, query
 rewriting, query decomposition, and reranking. Circuit breakers wrap every one of these
 calls and degrade to a clear fallback message (not fabricated content) if the LLM is
-unreachable.
+unreachable. LangSmith traces all of it when `LANGSMITH_TRACING_ENABLED=true`.
 
 **Still example/placeholder, by design, given no external service was wired in for it:**
 - `hybrid_retriever.py` returns a small fixed set of example documents about this
   repo's own architecture - there's no vector database behind it. Swap in Pinecone /
   Qdrant / pgvector / Chroma behind the same `retrieve()` interface to make this real.
-- `web_search.py` / `code_search.py`'s web-search tool returns one canned result - it
-  needs a real search API (Tavily, Brave, Serper, etc.) to be live. `code_search.py`
-  does grep the real repository tree, so that one is real within its narrow scope.
+- `web_search.py`'s web-search tool returns one canned result - it needs a real search
+  API (Tavily, Brave, Serper, etc.) to be live. `code_search.py` does grep the real
+  repository tree, so that one is real within its narrow scope.
 - `semantic_cache.py` is an exact-string-match in-process cache, not embedding-based
   semantic similarity, and isn't Redis-backed yet despite `REDIS_URL` being configured.
 
 If you're evaluating this template for your own use, the honest summary is: the
-resilience/auth/observability/eval scaffolding is production-grade; the retrieval
-corpus is a placeholder you need to point at real data.
+reasoning, resilience, auth, observability, and eval scaffolding are real and tested;
+the retrieval corpus is a placeholder you need to point at real data.
 
 ---
 
@@ -76,7 +86,7 @@ production-ai-template/
 │   ├── agents/                # Layer 6 (E): Agentic Intelligence Layer
 │   │   ├── executor.py       # (E) Real LLM-driven ReAct loop (tool-calling), guarded by breakers
 │   │   ├── document_grader.py# Fast heuristic relevance filter (no LLM call, by design)
-│   │   ├── query_decomposer.py # Real: LLM-based, logged for visibility (not yet parallelized)
+│   │   ├── query_decomposer.py # Real: LLM-based; multi-part queries become an explicit checklist fed to the agent
 │   │   ├── adaptive_router.py# Skips the full agent loop for short/simple queries
 │   │   └── tools/            # (T): Tool Registry & Definitions
 │   │       ├── registry.py   # (T) Centralized validation & schema auto-generation
@@ -92,6 +102,7 @@ production-ai-template/
 │   ├── main.py               # Layer 1: Core API Entrypoint (FastAPI + Throttling)
 │   ├── config.py             # Refuses to boot outside dev with the default JWT secret
 │   ├── models.py             
+│   ├── types.py              # Shared TypedDicts/type aliases (see Continuous Integration below for the zero-Any enforcement)
 │   └── Dockerfile            
 ├── migrations/               # Database Schema Migrations (Alembic)
 │   ├── env.py                # Asynchronous migration runner
@@ -182,6 +193,11 @@ production-ai-template/
   `APP_ENV` unless `JWT_SECRET` has been changed from the published default, so this
   convenience path can't silently ship active in a real deployment.
 * **Tool Authorization:** Overrides client-provided permissions JSON payload properties with verified server-side JWT roles to secure high-risk actions.
+* **Session isolation:** `session_id` is prefixed server-side with the authenticated
+  caller's `tenant_id` (see `_scoped_session_id` in `app/main.py`) before it touches
+  conversation history or agent checkpoints - two tenants can't collide on the same
+  client-chosen session name, and a caller can't read or clear a session outside their
+  own tenant by guessing the id.
 
 ### ⚡ Resilience Circuit Breakers
 * **Layer:** [resilience.py](app/security/resilience.py)
@@ -201,11 +217,16 @@ production-ai-template/
 ### 🧪 Continuous Integration (CI/CD)
 * **Layer:** [.github/workflows/ci.yml](.github/workflows/ci.yml)
 * **Design:** On push/pull request, spins up containerized runner executing:
-  * Style enforcement and linter checks (`ruff`)
-  * Static type validation (`mypy`)
+  * Style enforcement and linter + formatter checks (`ruff check`, `ruff format --check`)
+  * Static type validation (`mypy`) across `app`, `evaluation`, `observability`,
+    `scripts`, and `tests` - `disallow_any_generics` + `warn_return_any` enforced, so
+    `Any` (explicit or leaked from an untyped call) fails the build. See `app/types.py`
+    for the shared types this makes possible instead of `Dict[str, Any]` everywhere.
   * Security vulnerability scanning (`bandit`)
   * Unit test suite execution (`pytest`) - LLM calls mocked at the `llm_client` boundary, not hardcoded into runtime modules; see `tests/test_llm_integration.py`
-  * Quality evaluations (`offline_eval.py`)
+  * Database migrations, then quality evaluations (`offline_eval.py`) - the eval step
+    needs a real `NVIDIA_API_KEY` configured as a repo secret to pass; without one it
+    correctly reports 0% concept recall rather than silently skipping
 
 ---
 
@@ -232,6 +253,9 @@ production-ai-template/
    ```bash
    docker-compose up --build
    ```
+   The Streamlit UI authenticates automatically with a demo key by default (see
+   `FRONTEND_API_KEY` in `docker-compose.yml`) - the sidebar shows whether it's
+   sending real credentials or falling back to the backend's dev-mode bypass.
 
 ### Running Tests
 ```bash
