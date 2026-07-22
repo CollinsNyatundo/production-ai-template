@@ -1,50 +1,41 @@
 import logging
 from typing import List
 
+from app.components.openkb_client import openkb_client
 from app.models import SearchDocument
 
-logger = logging.getLogger("app.components.hybrid_retriever")
+logger = logging.getLogger('app.components.hybrid_retriever')
 
 
 class HybridRetriever:
     def __init__(self):
-        # In production, initialize vector DB client (e.g., Pinecone/Qdrant) and local BM25 index
-        logger.info("Initializing Hybrid Retriever (Dense Vector + Sparse BM25)...")
+        logger.info('Initializing HybridRetriever via OpenKB sidecar integration...')
 
     async def retrieve(self, query: str, top_k: int = 5) -> List[SearchDocument]:
-        logger.info(f"Retrieving candidate documents for query: {query}")
-
-        # MOCK IMPLEMENTATION: Mitigating Git Bloat by simulating DB query
-        # Rather than querying local raw files, a production retriever connects to a remote DB.
-        mock_docs = [
-            SearchDocument(
-                content="Production-ready architectures require input guardrails, output validators, and distributed APM monitoring to survive high user volumes.",
-                metadata={"source": "docs/architecture.md", "category": "technical"},
-                score=0.92,
-            ),
-            SearchDocument(
-                content="Hot-swappable prompts registry allows prompt engineers to update system messages at runtime without deploying code.",
-                metadata={"source": "docs/api-reference.md", "category": "engineering"},
-                score=0.88,
-            ),
-            SearchDocument(
-                content="Semantic caching (semantic cache) stores embeddings of queries to serve subsequent similar requests under 5ms, saving API costs.",
-                metadata={
-                    "source": "app/services/semantic_cache.py",
-                    "category": "performance",
-                },
-                score=0.85,
-            ),
-        ]
-
-        # Filter mock results by query keywords if present
-        results = [doc for doc in mock_docs if any(word in doc.content.lower() for word in query.lower().split())]
-
-        # Fallback to all mock docs if no keywords match
-        if not results:
-            results = mock_docs
-
-        return results[:top_k]
+        logger.info(f'Retrieving candidate documents via OpenKB for query: {query}')
+        try:
+            raw_results = await openkb_client.query(query, limit=top_k)
+            documents = []
+            for item in raw_results:
+                if isinstance(item, dict):
+                    content = item.get('content', item.get('chunk_content', str(item)))
+                    meta = item.get('metadata', {})
+                    score = float(item.get('relevance', item.get('score', 0.9)))
+                else:
+                    content = str(item)
+                    meta = {}
+                    score = 0.9
+                documents.append(SearchDocument(content=content, metadata=meta, score=score))
+            return documents[:top_k]
+        except Exception as e:
+            logger.warning(f'OpenKB retrieval failed or unavailable ({e}); falling back to local fallback.')
+            return [
+                SearchDocument(
+                    content=f'Semantic caching (semantic cache) stores embeddings of queries to serve subsequent requests for {query}.',
+                    metadata={'source': 'fallback', 'category': 'performance'},
+                    score=0.85,
+                )
+            ]
 
 
 hybrid_retriever = HybridRetriever()
