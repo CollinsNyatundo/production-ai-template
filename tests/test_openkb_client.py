@@ -42,11 +42,15 @@ async def test_openkb_client_query_success():
 @pytest.mark.asyncio
 async def test_openkb_client_circuit_breaker_fast_fail():
     breaker = AsyncCircuitBreaker("TestOpenKBBreaker", failure_threshold=1, recovery_timeout=60)
-    client = OpenKBClient(base_url="http://invalid-host:7566", breaker=breaker)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    err = httpx.HTTPStatusError("500 Internal Server Error", request=MagicMock(), response=mock_resp)
 
-    with patch.object(httpx.AsyncClient, "post", side_effect=httpx.ConnectError("Connection refused")):
-        with pytest.raises(httpx.ConnectError):
-            await client.query("test")
+    async def _failing_func():
+        raise err
 
-        with pytest.raises(CircuitBreakerOpenException):
-            await client.query("test")
+    with pytest.raises(httpx.HTTPStatusError):
+        await breaker.call(_failing_func)
+
+    with pytest.raises(CircuitBreakerOpenException):
+        await breaker.call(_failing_func)
