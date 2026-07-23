@@ -1,5 +1,5 @@
-import logging
 import json
+import logging
 import re
 from typing import List
 
@@ -8,47 +8,47 @@ from app.prompts.registry import prompt_registry
 from app.security.resilience import llm_breaker
 from app.services.llm_client import llm_client
 
-logger = logging.getLogger('app.components.reranker')
+logger = logging.getLogger("app.components.reranker")
 
 
 class Reranker:
     def __init__(self):
-        logger.info('Initializing LLM-based Reranker component...')
+        logger.info("Initializing LLM-based Reranker component...")
 
     async def rerank(self, query: str, documents: List[SearchDocument]) -> List[SearchDocument]:
         if len(documents) <= 1:
             return documents
 
-        logger.info(f'Reranking {len(documents)} documents for query: {query}')
+        logger.info(f"Reranking {len(documents)} documents for query: {query}")
         try:
             scores: List[float] = await llm_breaker.call(self._score_documents, query, documents)
             if len(scores) != len(documents):
-                raise ValueError(f'Expected {len(documents)} scores, got {len(scores)}')
+                raise ValueError(f"Expected {len(documents)} scores, got {len(scores)}")
             for doc, score in zip(documents, scores):
                 doc.score = float(score)
-            return sorted(documents, key=lambda d: (d.score if d.score is not None else 0.0), reverse=True)
+            return sorted(documents, key=lambda d: d.score if d.score is not None else 0.0, reverse=True)
         except Exception as e:
-            logger.warning(f'LLM reranking unavailable ({e}); preserving original retrieval score order.')
-            return sorted(documents, key=lambda d: (d.score if d.score is not None else 0.0), reverse=True)
+            logger.warning(f"LLM reranking unavailable ({e}); preserving original retrieval score order.")
+            return sorted(documents, key=lambda d: d.score if d.score is not None else 0.0, reverse=True)
 
     async def _score_documents(self, query: str, documents: List[SearchDocument]) -> List[float]:
-        prompt_template = await prompt_registry.get_prompt('rerank_prompt')
-        doc_list_str = '\n'.join(f'{i + 1}. {d.content}' for i, d in enumerate(documents))
+        prompt_template = await prompt_registry.get_prompt("rerank_prompt")
+        doc_list_str = "\n".join(f"{i + 1}. {d.content}" for i, d in enumerate(documents))
         prompt = prompt_template.format(query=query, documents=doc_list_str)
 
         response = await llm_client.chat(
-            messages=[{'role': 'user', 'content': prompt}],
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=200,
         )
-        content = response.choices[0].message.content or '[]'
+        content = response.choices[0].message.content or "[]"
 
-        match = re.search(r'\[[\d.,\s]*\]', content)
+        match = re.search(r"\[[\d.,\s]*\]", content)
         if not match:
-            raise ValueError(f'Could not find a JSON score array in reranker output: {content!r}')
+            raise ValueError(f"Could not find a JSON score array in reranker output: {content!r}")
         parsed = json.loads(match.group(0))
         if not isinstance(parsed, list):
-            raise ValueError(f'Reranker output was not a JSON array: {content!r}')
+            raise ValueError(f"Reranker output was not a JSON array: {content!r}")
         return [float(x) for x in parsed]
 
 

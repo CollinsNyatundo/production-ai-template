@@ -2,11 +2,11 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -26,6 +26,7 @@ logger = logging.getLogger("app")
 
 limiter = Limiter(key_func=get_remote_address)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing application services...")
@@ -42,7 +43,7 @@ app = FastAPI(
 )
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, cast(Any, _rate_limit_exceeded_handler))
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,6 +52,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("health")
 async def health_check():
@@ -96,7 +98,7 @@ async def query_endpoint(
         client_session_id = payload.session_id
         payload.session_id = _scoped_session_id(current_user, payload.session_id)
 
-        logger.info f"Executing query for tenant {current_user.tenant_id}")
+        logger.info(f"Executing query for tenant {current_user.tenant_id}")
 
         response = await rag_pipeline.execute(payload)
         response.latency_ms = (time.perf_counter() - start_time) * 1000.0
@@ -130,6 +132,6 @@ async def query_stream_endpoint(
             yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error(f"Error streaming from OpenKB: {e}")
-            yield f"data: {\"error\": \"{str(e)}\"}\n\n"
+            yield f'data: {{"error": "{str(e)}"}}\n\n'
 
     return StreamingResponse(sse_generator(), media_type="text/event-stream")

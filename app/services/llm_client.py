@@ -59,6 +59,7 @@ class LLMClient:
                 api_key=settings.nvidia_api_key,
                 base_url=settings.nvidia_base_url,
                 timeout=settings.llm_request_timeout_s,
+                max_retries=5,
             )
             if _TRACING_ENABLED:
                 # Deferred import: langsmith is only needed when tracing is on.

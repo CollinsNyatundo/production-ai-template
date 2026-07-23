@@ -62,13 +62,22 @@ def evaluate_answer_and_trajectory(
 
 async def run_active_evaluation(test_cases: "list[dict[str, JSONValue]]") -> "list[dict[str, JSONValue]]":
     """Executes fresh queries through the pipeline and evaluates them."""
+    from app.security.resilience import llm_breaker, search_tool_breaker
+
+    llm_breaker.state = "CLOSED"
+    llm_breaker.failure_count = 0
+    search_tool_breaker.state = "CLOSED"
+    search_tool_breaker.failure_count = 0
+
     results = []
 
     mock_user = User(
         username="eval_bot", role="admin", permission_level="high", scopes=["read", "write"], tenant_id="eval-tenant"
     )
 
-    for case in test_cases:
+    for idx, case in enumerate(test_cases):
+        if idx > 0:
+            await asyncio.sleep(4.0)  # Rate limit safety delay between API queries
         case_id = case.get("id")
         case_query = case.get("query")
         if not isinstance(case_query, str):

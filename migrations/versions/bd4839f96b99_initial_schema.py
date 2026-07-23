@@ -20,27 +20,33 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema: Create conversation_history and agent_checkpoints tables."""
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_tables = inspector.get_table_names()
+
     # 1. Create conversation_history table
-    op.create_table(
-        "conversation_history",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("session_id", sa.String(length=255), nullable=False),
-        sa.Column("role", sa.String(length=50), nullable=False),
-        sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("timestamp", sa.DateTime(), nullable=False, server_default=sa.func.now()),
-    )
-    # Add performance index on session_id for query speed
-    op.create_index("ix_conversation_history_session_id", "conversation_history", ["session_id"], unique=False)
+    if "conversation_history" not in existing_tables:
+        op.create_table(
+            "conversation_history",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("session_id", sa.String(length=255), nullable=False),
+            sa.Column("role", sa.String(length=50), nullable=False),
+            sa.Column("content", sa.Text(), nullable=False),
+            sa.Column("timestamp", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        )
+        # Add performance index on session_id for query speed
+        op.create_index("ix_conversation_history_session_id", "conversation_history", ["session_id"], unique=False)
 
     # 2. Create agent_checkpoints table
-    op.create_table(
-        "agent_checkpoints",
-        sa.Column("session_id", sa.String(length=255), primary_key=True),
-        sa.Column("current_step", sa.Integer(), nullable=False),
-        sa.Column("state_json", sa.Text(), nullable=False),
-        sa.Column("trajectory_json", sa.Text(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
-    )
+    if "agent_checkpoints" not in existing_tables:
+        op.create_table(
+            "agent_checkpoints",
+            sa.Column("session_id", sa.String(length=255), primary_key=True),
+            sa.Column("current_step", sa.Integer(), nullable=False),
+            sa.Column("state_json", sa.Text(), nullable=False),
+            sa.Column("trajectory_json", sa.Text(), nullable=False),
+            sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        )
 
 
 def downgrade() -> None:

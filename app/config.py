@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     nvidia_api_key: str = Field(default="", validation_alias="NVIDIA_API_KEY")
     nvidia_base_url: str = Field(default="https://integrate.api.nvidia.com/v1", validation_alias="NVIDIA_BASE_URL")
     nvidia_model: str = Field(default="meta/llama-3.1-70b-instruct", validation_alias="NVIDIA_MODEL")
-    llm_request_timeout_s: float = Field(default=30.0, validation_alias="LLM_REEUEST_TIMEOUT_S")
+    nvidia_embedding_model: str = Field(default="nvidia/nv-embedqa-e5-v5", validation_alias="NVIDIA_EMBEDDING_MODEL")
+    llm_request_timeout_s: float = Field(default=30.0, validation_alias="LLM_REQUEST_TIMEOUT_S")
 
     openkb_base_url: str = Field(default="http://127.0.0.1:7566", validation_alias="OPENKB_BASE_URL")
     openkb_timeout_s: float = Field(default=60.0, validation_alias="OPENKB_TIMEOUT_S")
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///app.db", validation_alias="DATABASE_URL")
 
     jwt_secret: str = Field(default=_INSECURE_DEFAULT_JWT_SECRET, validation_alias="JWT_SECRET")
-    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHP")
 
     cors_allowed_origins_raw: str = Field(
         default="http://localhost:8501,http://localhost:3000",
@@ -49,9 +50,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def check_production_secrets(self) -> "Settings":
         if self.app_env not in ("development", "test", "testing") and self.jwt_secret == _INSECURE_DEFAULT_JWT_SECRET:
-            raise ValueError(
-                f"Refusing to start: APP_ENV='{self.app_env}' but JWT_SECRET is still default."
-            )
+            raise ValueError(f"Refusing to start: APP_ENV='{self.app_env}' but JWT_SECRET is still default.")
         return self
 
 
