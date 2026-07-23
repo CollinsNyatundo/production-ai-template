@@ -56,6 +56,28 @@ class ToolSchema(TypedDict):
 
 
 # ---------------------------------------------------------------------------
+# Headroom Context Compression & Reversible Storage
+# ---------------------------------------------------------------------------
+class HeadroomCompressedPayload(TypedDict):
+    doc_id: str
+    original_token_count: int
+    compressed_token_count: int
+    compressed_content: str
+    compression_ratio: float
+    is_reversible: bool
+
+
+class ExpandContextArgs(TypedDict):
+    document_id: str
+
+
+class ExpandContextResult(TypedDict):
+    document_id: str
+    content: str
+    status: str
+
+
+# ---------------------------------------------------------------------------
 # Agent execution
 # ---------------------------------------------------------------------------
 class TokenUsage(TypedDict):

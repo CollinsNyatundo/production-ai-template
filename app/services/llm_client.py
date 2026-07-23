@@ -90,6 +90,12 @@ class LLMClient:
         if not self._configured or self._client is None:
             raise LLMNotConfiguredError("NVIDIA_API_KEY is not configured. Set it in .env to enable real LLM calls.")
 
+        # CacheAligner: Standardize system message prefix to maximize NVIDIA NIM KV-cache hit ratios
+        if messages and len(messages) > 0:
+            first_msg = messages[0]
+            if first_msg.get("role") == "system" and first_msg.get("content"):
+                first_msg["content"] = str(first_msg["content"]).strip()
+
         # openai's SDK types `messages`/`tools` as a discriminated union of
         # per-role/per-tool-type TypedDicts (far more granular than needed here);
         # our ChatMessage/ToolSchema are intentionally the looser wire-format

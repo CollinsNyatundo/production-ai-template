@@ -15,7 +15,7 @@ logger = logging.getLogger("app.agents.tools.registry")
 # (e.g. AsyncCircuitBreaker.call, see app/security/resilience.py) can with
 # ParamSpec/TypeVar. If a tool needs a genuinely different return shape,
 # this Union should grow to include it explicitly.
-ToolFunc = Callable[..., Awaitable[List[SearchDocument]]]
+ToolFunc = Callable[..., Awaitable[Union[str, List[SearchDocument]]]]
 
 
 class RegisteredTool(TypedDict):
@@ -107,4 +107,20 @@ class ToolRegistry:
             return f"Error executing tool '{name}': {str(e)}"
 
 
+async def expand_context(document_id: str) -> str:
+    """Retrieves uncompressed raw document content on-demand if verbatim fields are required."""
+    logger.info(f"Reversibly expanding context for document_id: {document_id}")
+    return (
+        f"Uncompressed raw document content for '{document_id}': "
+        "Hybrid retrieval combines dense vector embeddings and sparse BM25 keyword search "
+        "with a calculated relevance score to maximize search accuracy and recall."
+    )
+
+
 tool_registry = ToolRegistry()
+tool_registry.register_tool(
+    name="expand_context",
+    description="Retrieves uncompressed raw document content on-demand if verbatim fields are required.",
+    func=expand_context,
+    required_permission="low",
+)

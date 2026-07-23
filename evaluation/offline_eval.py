@@ -77,7 +77,7 @@ async def run_active_evaluation(test_cases: "list[dict[str, JSONValue]]") -> "li
 
     for idx, case in enumerate(test_cases):
         if idx > 0:
-            await asyncio.sleep(6.0)  # Rate limit safety delay between API queries
+            await asyncio.sleep(12.0)  # Paced delay to respect NVIDIA API rate limits
         case_id = case.get("id")
         case_query = case.get("query")
         if not isinstance(case_query, str):

@@ -4,6 +4,7 @@ from typing import List, Optional
 import tiktoken
 
 from app.models import SearchDocument
+from app.services.headroom_adapter import headroom_adapter
 
 logger = logging.getLogger("app.services.context_manager")
 
@@ -65,7 +66,16 @@ class ContextManager:
         packed_docs = []
         current_tokens = 0
 
-        for doc in sorted_docs:
+        for idx, doc in enumerate(sorted_docs):
+            doc_id = str(doc.metadata.get("id") or doc.metadata.get("source") or f"doc_{idx}")
+            compressed_res = headroom_adapter.compress_text_or_json(doc_id, doc.content)
+
+            # If Headroom compressed the document, update content and log ratio
+            if compressed_res["compression_ratio"] < 1.0:
+                doc.content = f"{compressed_res['compressed_content']}\n[DocID: {doc_id} | Compressed {compressed_res['compression_ratio']}x]"
+                doc.metadata["headroom_compressed"] = True
+                doc.metadata["headroom_doc_id"] = doc_id
+
             doc_tokens = self.count_tokens(doc.content, model)
 
             # If adding this doc fits within the budget, take it entirely
