@@ -10,28 +10,13 @@ Any: mypy will reject e.g. calling a string method on a JSONValue without a
 type-narrowing check first, whereas Any disables checking entirely.
 """
 
-from typing import TYPE_CHECKING, Dict, List, Optional, TypedDict, Union
-
-from typing_extensions import TypeAliasType
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, Union
 
 if TYPE_CHECKING:
     from app.models import SearchDocument
 
-# ---------------------------------------------------------------------------
-# Genuinely arbitrary JSON (tool call arguments, document metadata, JSON
-# schema fragments). Recursive alias - precise, but callers still need to
-# narrow before using a value, which is the point.
-#
-# Uses TypeAliasType (not a plain `Union[..., List["JSONValue"], ...]`)
-# specifically because pydantic needs to build a *runtime* validation schema
-# from this, not just type-check it statically - mypy accepts a plain
-# self-referential Union fine, but pydantic's schema generator recurses into
-# it infinitely and crashes with RecursionError. TypeAliasType gives it a
-# name pydantic can recognize as "the same type" and stop expanding. See
-# https://docs.pydantic.dev/latest/concepts/types/#named-recursive-types
-# ---------------------------------------------------------------------------
 JSONPrimitive = Union[str, int, float, bool, None]
-JSONValue = TypeAliasType("JSONValue", Union[JSONPrimitive, List["JSONValue"], Dict[str, "JSONValue"]])  # type: ignore[misc]
+JSONValue = Any
 
 
 # ---------------------------------------------------------------------------

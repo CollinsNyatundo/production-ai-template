@@ -50,9 +50,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def check_production_secrets(self) -> "Settings":
         if self.app_env not in ("development", "test", "testing") and self.jwt_secret == _INSECURE_DEFAULT_JWT_SECRET:
-            raise ValueError(
-                f"Refusing to start: APP_ENV='{self.app_env}' but JWT_SECRET is still default."
-            )
+            raise ValueError(f"Refusing to start: APP_ENV='{self.app_env}' but JWT_SECRET is still default.")
         return self
 
 
