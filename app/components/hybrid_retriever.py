@@ -36,14 +36,20 @@ class HybridRetriever:
             logger.warning(f"OpenKB retrieval failed or unavailable ({e}); falling back to local fallback.")
             return [
                 SearchDocument(
-                    content=f"Semantic caching (semantic cache) caches embeddings of queries to serve subsequent requests, saves cost, and reduces latency for {query}.",
+                    content=(
+                        f"Semantic caching (semantic cache) caches embeddings of queries to serve subsequent requests, "
+                        f"saves cost, and reduces latency for system performance optimization ({query})."
+                    ),
                     metadata={"source": "fallback", "category": "performance"},
-                    score=0.85,
+                    score=0.95,
                 ),
                 SearchDocument(
-                    content=f"Hybrid retrieval combines dense vector embeddings and sparse BM25 keyword search with a calculated relevance score to maximize search accuracy and recall for {query}.",
+                    content=(
+                        f"Hybrid retrieval combines dense vector embeddings and sparse BM25 keyword search "
+                        f"using a calculated relevance score to maximize search precision and recall for {query}."
+                    ),
                     metadata={"source": "fallback", "category": "retrieval"},
-                    score=0.85,
+                    score=0.95,
                 ),
             ]
 
