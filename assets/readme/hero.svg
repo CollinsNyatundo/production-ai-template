@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 440" width="100%" height="100%">
   <defs>
     <!-- Background Gradients -->
     <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -8,28 +8,17 @@
     </linearGradient>
     <linearGradient id="accent-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#10B981"/>
-      <stop offset="50%" stop-color="#3B82F6"/>
-      <stop offset="100%" stop-color="#8B5CF6"/>
+      <stop offset="35%" stop-color="#3B82F6"/>
+      <stop offset="70%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#EC4899"/>
     </linearGradient>
     <linearGradient id="card-bg" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#1F2937" stop-opacity="0.8"/>
-      <stop offset="100%" stop-color="#111827" stop-opacity="0.9"/>
+      <stop offset="0%" stop-color="#1F2937" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#111827" stop-opacity="0.95"/>
     </linearGradient>
     <linearGradient id="card-border" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#374151"/>
       <stop offset="100%" stop-color="#1F2937"/>
-    </linearGradient>
-    <linearGradient id="node-green" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#059669"/>
-      <stop offset="100%" stop-color="#10B981"/>
-    </linearGradient>
-    <linearGradient id="node-blue" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#2563EB"/>
-      <stop offset="100%" stop-color="#3B82F6"/>
-    </linearGradient>
-    <linearGradient id="node-purple" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#7C3AED"/>
-      <stop offset="100%" stop-color="#8B5CF6"/>
     </linearGradient>
 
     <!-- Subtle Grid Pattern -->
@@ -45,125 +34,112 @@
   </defs>
 
   <!-- Canvas Background -->
-  <rect width="1200" height="420" rx="16" fill="url(#bg-gradient)"/>
-  <rect width="1200" height="420" rx="16" fill="url(#grid)" opacity="0.6"/>
+  <rect width="1200" height="440" rx="16" fill="url(#bg-gradient)"/>
+  <rect width="1200" height="440" rx="16" fill="url(#grid)" opacity="0.6"/>
 
-  <!-- Top Decorative Accent Line -->
+  <!-- Top Accent Line -->
   <rect x="0" y="0" width="1200" height="4" rx="2" fill="url(#accent-gradient)"/>
 
   <!-- LEFT COLUMN: Brand Title & Metadata -->
-  <g transform="translate(60, 50)">
+  <g transform="translate(60, 45)">
     <!-- Badge -->
-    <rect x="0" y="0" width="230" height="28" rx="14" fill="#064E3B" stroke="#10B981" stroke-width="1"/>
+    <rect x="0" y="0" width="260" height="28" rx="14" fill="#064E3B" stroke="#10B981" stroke-width="1"/>
     <circle cx="14" cy="14" r="4" fill="#34D399" filter="url(#glow)"/>
-    <text x="28" y="18" fill="#A7F3D0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" letter-spacing="0.5">PRODUCTION-READY AI BACKEND</text>
+    <text x="28" y="18" fill="#A7F3D0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" letter-spacing="0.5">ENTERPRISE-GRADE AI ARCHITECTURE</text>
 
-    <!-- Main Title -->
-    <text x="0" y="72" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="40" font-weight="800" letter-spacing="-0.5">Production AI Template</text>
-
+    <!-- Title -->
+    <text x="0" y="72" fill="#F9FAFB" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="36" font-weight="800" letter-spacing="-0.5">Production AI Template</text>
+    
     <!-- Subtitle -->
-    <text x="0" y="105" fill="#94A3B8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="400" width="500">
-      Resilient, Zero-Any, Multi-Tenant LLM Agent Framework
-    </text>
-    <text x="0" y="127" fill="#64748B" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="400">
-      Powered by OpenKB Sidecar, NVIDIA NIM Embeddings &amp; Async Circuit Breakers
-    </text>
+    <text x="0" y="105" fill="#9CA3AF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15" font-weight="400">Resilient Multi-Tenant Agentic Framework with NVIDIA NIM &amp; Headroom</text>
 
-    <!-- Tech Stack Pill Group -->
-    <g transform="translate(0, 160)">
-      <!-- Pill 1: Python 3.11+ -->
-      <rect x="0" y="0" width="115" height="28" rx="6" fill="#1E293B" stroke="#334155" stroke-width="1"/>
-      <text x="12" y="18" fill="#38BDF8" font-family="monospace" font-size="12" font-weight="600">Python 3.11+</text>
+    <!-- Highlights Container -->
+    <g transform="translate(0, 135)">
+      <!-- Key Metric Pill 1 -->
+      <rect x="0" y="0" width="220" height="48" rx="8" fill="url(#card-bg)" stroke="#374151" stroke-width="1"/>
+      <text x="16" y="22" fill="#10B981" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700">100% Strict Type Safety</text>
+      <text x="16" y="38" fill="#6B7280" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11">Mypy Zero Implicit Any</text>
 
-      <!-- Pill 2: mypy strict -->
-      <rect x="125" y="0" width="105" height="28" rx="6" fill="#1E293B" stroke="#334155" stroke-width="1"/>
-      <text x="137" y="18" fill="#34D399" font-family="monospace" font-size="12" font-weight="600">Zero Any</text>
+      <!-- Key Metric Pill 2 -->
+      <rect x="232" y="0" width="220" height="48" rx="8" fill="url(#card-bg)" stroke="#374151" stroke-width="1"/>
+      <text x="248" y="22" fill="#3B82F6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700">NVIDIA NIM &amp; OpenKB</text>
+      <text x="248" y="38" fill="#6B7280" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11">Dense + BM25 Hybrid Search</text>
 
-      <!-- Pill 3: FastAPI -->
-      <rect x="240" y="0" width="95" height="28" rx="6" fill="#1E293B" stroke="#334155" stroke-width="1"/>
-      <text x="252" y="18" fill="#F472B6" font-family="monospace" font-size="12" font-weight="600">FastAPI</text>
+      <!-- Key Metric Pill 3 -->
+      <rect x="0" y="60" width="220" height="48" rx="8" fill="url(#card-bg)" stroke="#374151" stroke-width="1"/>
+      <text x="16" y="82" fill="#EC4899" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700">Headroom Compression</text>
+      <text x="16" y="98" fill="#6B7280" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11">Reversible Context Crusher</text>
 
-      <!-- Pill 4: OpenKB Sidecar -->
-      <rect x="345" y="0" width="125" height="28" rx="6" fill="#1E293B" stroke="#334155" stroke-width="1"/>
-      <text x="357" y="18" fill="#FBBF24" font-family="monospace" font-size="12" font-weight="600">OpenKB Sidecar</text>
+      <!-- Key Metric Pill 4 -->
+      <rect x="232" y="60" width="220" height="48" rx="8" fill="url(#card-bg)" stroke="#374151" stroke-width="1"/>
+      <text x="248" y="82" fill="#8B5CF6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700">Async Circuit Breaker</text>
+      <text x="248" y="98" fill="#6B7280" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11">Fault-Tolerant Tool Execution</text>
     </g>
 
-    <!-- Core Highlights Cards -->
-    <g transform="translate(0, 210)">
-      <rect x="0" y="0" width="470" height="110" rx="10" fill="url(#card-bg)" stroke="url(#card-border)" stroke-width="1"/>
-      <text x="16" y="28" fill="#E2E8F0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700">⚡ REASONING &amp; RESILIENCE HIGHLIGHTS</text>
-      
-      <circle cx="22" cy="52" r="3" fill="#10B981"/>
-      <text x="34" y="56" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13">ReAct Tool Execution Loop with Async Circuit Breakers</text>
+    <!-- Tech Badges Bar -->
+    <g transform="translate(0, 275)">
+      <rect x="0" y="0" width="90" height="24" rx="4" fill="#1F2937" stroke="#4B5563" stroke-width="1"/>
+      <text x="45" y="16" fill="#D1D5DB" font-family="monospace" font-size="11" font-weight="600" text-anchor="middle">FastAPI</text>
 
-      <circle cx="22" cy="74" r="3" fill="#3B82F6"/>
-      <text x="34" y="78" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13">NVIDIA NIM <tspan fill="#60A5FA">nv-embedqa-e5-v5</tspan> Hybrid Vector + BM25</text>
+      <rect x="98" y="0" width="100" height="24" rx="4" fill="#1F2937" stroke="#4B5563" stroke-width="1"/>
+      <text x="148" y="16" fill="#D1D5DB" font-family="monospace" font-size="11" font-weight="600" text-anchor="middle">NVIDIA NIM</text>
 
-      <circle cx="22" cy="96" r="3" fill="#8B5CF6"/>
-      <text x="34" y="100" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13">OpenTelemetry Spans &amp; Automated Concept Recall Eval</text>
+      <rect x="206" y="0" width="85" height="24" rx="4" fill="#1F2937" stroke="#4B5563" stroke-width="1"/>
+      <text x="248" y="16" fill="#D1D5DB" font-family="monospace" font-size="11" font-weight="600" text-anchor="middle">OpenKB</text>
+
+      <rect x="299" y="0" width="95" height="24" rx="4" fill="#1F2937" stroke="#4B5563" stroke-width="1"/>
+      <text x="346" y="16" fill="#EC4899" font-family="monospace" font-size="11" font-weight="600" text-anchor="middle">Headroom</text>
+
+      <rect x="402" y="0" width="50" height="24" rx="4" fill="#1F2937" stroke="#4B5563" stroke-width="1"/>
+      <text x="427" y="16" fill="#D1D5DB" font-family="monospace" font-size="11" font-weight="600" text-anchor="middle">3.11+</text>
     </g>
   </g>
 
-  <!-- RIGHT COLUMN: System Architecture Topology Node Flow -->
-  <g transform="translate(600, 50)">
-    <!-- Container Panel -->
-    <rect x="0" y="0" width="540" height="320" rx="12" fill="#0F172A" stroke="#1E293B" stroke-width="1.5"/>
-    <text x="20" y="32" fill="#94A3B8" font-family="monospace" font-size="11" font-weight="600" letter-spacing="1">SYSTEM ARCHITECTURE RUNTIME FLOW</text>
+  <!-- RIGHT COLUMN: System Diagram Window -->
+  <g transform="translate(560, 45)">
+    <!-- Terminal/Diagram Window Frame -->
+    <rect x="0" y="0" width="580" height="350" rx="12" fill="url(#card-bg)" stroke="#374151" stroke-width="1"/>
+    
+    <!-- Window Header -->
+    <path d="M 0 12 Q 0 0 12 0 L 568 0 Q 580 0 580 12 L 580 36 L 0 36 Z" fill="#1E293B"/>
+    <circle cx="20" cy="18" r="5" fill="#EF4444"/>
+    <circle cx="36" cy="18" r="5" fill="#F59E0B"/>
+    <circle cx="52" cy="18" r="5" fill="#10B981"/>
+    <text x="290" y="22" fill="#9CA3AF" font-family="monospace" font-size="12" text-anchor="middle">system_flow_harness.py — 9-Layer Stack</text>
 
-    <!-- Node 1: FastAPI Entry -->
-    <g transform="translate(20, 60)">
-      <rect x="0" y="0" width="140" height="55" rx="8" fill="#1E293B" stroke="#3B82F6" stroke-width="1.5"/>
-      <text x="14" y="24" fill="#60A5FA" font-family="monospace" font-size="11" font-weight="700">FastAPI Entrypoint</text>
-      <text x="14" y="42" fill="#94A3B8" font-family="-apple-system, sans-serif" font-size="10">JWT &amp; Rate Limit</text>
-    </g>
+    <!-- Inner Visual Flow -->
+    <g transform="translate(30, 60)">
+      <!-- Layer 1: Client Query -->
+      <rect x="0" y="0" width="520" height="42" rx="6" fill="#1F2937" stroke="#10B981" stroke-width="1.5"/>
+      <text x="20" y="26" fill="#34D399" font-family="monospace" font-size="12" font-weight="700">1. Client Request</text>
+      <text x="220" y="26" fill="#9CA3AF" font-family="monospace" font-size="11">FastAPI + JWT / API Key Auth Gate</text>
 
-    <!-- Arrow 1 -> 2 -->
-    <path d="M 160 87 L 190 87" stroke="#3B82F6" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="4,2"/>
+      <!-- Connecting Arrow -->
+      <path d="M 260 42 L 260 56" stroke="#4B5563" stroke-width="2" stroke-dasharray="3,3"/>
 
-    <!-- Node 2: Security & Circuit Breaker -->
-    <g transform="translate(195, 60)">
-      <rect x="0" y="0" width="150" height="55" rx="8" fill="#1E293B" stroke="#10B981" stroke-width="1.5"/>
-      <text x="14" y="24" fill="#34D399" font-family="monospace" font-size="11" font-weight="700">Resilience Breakers</text>
-      <text x="14" y="42" fill="#94A3B8" font-family="-apple-system, sans-serif" font-size="10">LLM &amp; Tool Isolation</text>
-    </g>
+      <!-- Layer 2: Hybrid Retrieval & Headroom Context -->
+      <rect x="0" y="56" width="520" height="48" rx="6" fill="#1F2937" stroke="#3B82F6" stroke-width="1.5"/>
+      <text x="20" y="78" fill="#60A5FA" font-family="monospace" font-size="12" font-weight="700">2. Knowledge Base</text>
+      <text x="220" y="78" fill="#9CA3AF" font-family="monospace" font-size="11">OpenKB Sidecar + Headroom Context Crusher</text>
+      <text x="220" y="94" fill="#EC4899" font-family="monospace" font-size="10">Reversible Expandable Tokens</text>
 
-    <!-- Arrow 2 -> 3 -->
-    <path d="M 345 87 L 375 87" stroke="#10B981" stroke-width="2"/>
+      <!-- Connecting Arrow -->
+      <path d="M 260 104 L 260 118" stroke="#4B5563" stroke-width="2" stroke-dasharray="3,3"/>
 
-    <!-- Node 3: ReAct Agent Engine -->
-    <g transform="translate(380, 60)">
-      <rect x="0" y="0" width="140" height="55" rx="8" fill="#1E293B" stroke="#8B5CF6" stroke-width="1.5"/>
-      <text x="14" y="24" fill="#C084FC" font-family="monospace" font-size="11" font-weight="700">ReAct Loop (E)</text>
-      <text x="14" y="42" fill="#94A3B8" font-family="-apple-system, sans-serif" font-size="10">Executor &amp; Router</text>
-    </g>
+      <!-- Layer 3: Agentic Reasoning & Breaker -->
+      <rect x="0" y="118" width="520" height="48" rx="6" fill="#1F2937" stroke="#8B5CF6" stroke-width="1.5"/>
+      <text x="20" y="140" fill="#C084FC" font-family="monospace" font-size="12" font-weight="700">3. ReAct Agent Engine</text>
+      <text x="220" y="140" fill="#9CA3AF" font-family="monospace" font-size="11">NVIDIA NIM (LLM) + AsyncCircuitBreaker</text>
+      <text x="220" y="156" fill="#A7F3D0" font-family="monospace" font-size="10">expand_context Tool Registry Integration</text>
 
-    <!-- Vertical Arrow down to Retrieval -->
-    <path d="M 450 115 L 450 145" stroke="#8B5CF6" stroke-width="2"/>
+      <!-- Connecting Arrow -->
+      <path d="M 260 166 L 260 180" stroke="#4B5563" stroke-width="2" stroke-dasharray="3,3"/>
 
-    <!-- Node 4: Hybrid Retriever & OpenKB -->
-    <g transform="translate(320, 150)">
-      <rect x="0" y="0" width="200" height="60" rx="8" fill="#1E293B" stroke="#F59E0B" stroke-width="1.5"/>
-      <text x="14" y="24" fill="#FBBF24" font-family="monospace" font-size="11" font-weight="700">OpenKB Sidecar Client</text>
-      <text x="14" y="44" fill="#94A3B8" font-family="-apple-system, sans-serif" font-size="10">Hybrid BM25 + Vector Search</text>
-    </g>
-
-    <!-- Left Arrow from OpenKB to NVIDIA NIM -->
-    <path d="M 320 180 L 170 180" stroke="#F59E0B" stroke-width="2"/>
-
-    <!-- Node 5: NVIDIA NIM API -->
-    <g transform="translate(20, 150)">
-      <rect x="0" y="0" width="150" height="60" rx="8" fill="#1E293B" stroke="#76B900" stroke-width="1.5"/>
-      <text x="14" y="24" fill="#76B900" font-family="monospace" font-size="11" font-weight="700">NVIDIA NIM API</text>
-      <text x="14" y="44" fill="#94A3B8" font-family="-apple-system, sans-serif" font-size="10">nv-embedqa-e5-v5</text>
-    </g>
-
-    <!-- Bottom Layer: Harness Infrastructure -->
-    <g transform="translate(20, 230)">
-      <rect x="0" y="0" width="500" height="65" rx="8" fill="#020617" stroke="#334155" stroke-width="1" stroke-dasharray="3,3"/>
-      <text x="16" y="22" fill="#E2E8F0" font-family="monospace" font-size="11" font-weight="700">Harness Infrastructure: H = (E, T, C, S, L, V)</text>
-      <text x="16" y="45" fill="#64748B" font-family="-apple-system, sans-serif" font-size="10">
-        Async SQLAlchemy (S) • Context Token Budget (C) • Pub/Sub Hooks (L) • JSONL Trajectory Eval (V)
-      </text>
+      <!-- Layer 4: Evaluation & Observability -->
+      <rect x="0" y="180" width="520" height="48" rx="6" fill="#1F2937" stroke="#EC4899" stroke-width="1.5"/>
+      <text x="20" y="202" fill="#F472B6" font-family="monospace" font-size="12" font-weight="700">4. Valuation &amp; Eval</text>
+      <text x="220" y="202" fill="#9CA3AF" font-family="monospace" font-size="11">JSONL Trajectories + Active Concept Recall</text>
+      <text x="220" y="218" fill="#FBBF24" font-family="monospace" font-size="10">OpenTelemetry + LangSmith Cost Tracking</text>
     </g>
   </g>
 </svg>
