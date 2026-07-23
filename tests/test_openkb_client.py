@@ -1,8 +1,7 @@
-import asyncio
 from unittest.mock import MagicMock, patch
 
-import pytest
 import httpx
+import pytest
 
 from app.components.openkb_client import OpenKBClient
 from app.security.resilience import AsyncCircuitBreaker, CircuitBreakerOpenException
@@ -10,7 +9,8 @@ from app.security.resilience import AsyncCircuitBreaker, CircuitBreakerOpenExcep
 
 @pytest.mark.asyncio
 async def test_openkb_client_ingest_success():
-    client = OpenKBClient(base_url='http://mock-openkb:7566')
+    breaker = AsyncCircuitBreaker('TestIngestBreaker')
+    client = OpenKBClient(base_url='http://mock-openkb:7566', breaker=breaker)
     mock_resp = {'status': 'success', 'doc_id': 'doc_123'}
 
     mock_response = MagicMock()
@@ -25,7 +25,8 @@ async def test_openkb_client_ingest_success():
 
 @pytest.mark.asyncio
 async def test_openkb_client_query_success():
-    client = OpenKBClient(base_url='http://mock-openkb:7566')
+    breaker = AsyncCircuitBreaker('TestQueryBreaker')
+    client = OpenKBClient(base_url='http://mock-openkb:7566', breaker=breaker)
     mock_results = [{'content': 'Test result', 'relevance': 0.95}]
 
     mock_response = MagicMock()
