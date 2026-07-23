@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 450" width="100%" height="100%">
+  <defs>
+    <linearGradient id="arch-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B0F19"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="layer-card" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1E293B"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+    <pattern id="arch-grid" width="30" height="30" patternUnits="userSpaceOnUse">
+      <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#1E293B" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="450" rx="12" fill="url(#arch-bg)"/>
+  <rect width="1200" height="450" rx="12" fill="url(#arch-grid)" opacity="0.5"/>
+
+  <!-- Header -->
+  <text x="40" y="45" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800">System Architectural Taxonomy &amp; 9-Layer Breakdown</text>
+  <text x="40" y="70" fill="#94A3B8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14">Harness Model Decomposition H = (E, T, C, S, L, V) + Security &amp; Observability Scaffolding</text>
+
+  <!-- 3 Columns Layout -->
+
+  <!-- COLUMN 1: Client & Ingress (Layers 1-3) -->
+  <g transform="translate(40, 95)">
+    <rect x="0" y="0" width="350" height="320" rx="10" fill="url(#layer-card)" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="30" fill="#38BDF8" font-family="monospace" font-size="13" font-weight="700">1. INGRESS &amp; RETRIEVAL LAYER</text>
+
+    <!-- Layer 1: FastAPI API -->
+    <rect x="15" y="45" width="320" height="70" rx="6" fill="#1E293B" stroke="#0284C7" stroke-width="1"/>
+    <text x="30" y="70" fill="#E0F2FE" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Layer 1: FastAPI Entrypoint</text>
+    <text x="30" y="90" fill="#7DD3FC" font-family="monospace" font-size="11">app/main.py (SSE Streaming &amp; Rate Limiting)</text>
+
+    <!-- Layer 2: Hybrid Retrieval & OpenKB -->
+    <rect x="15" y="130" width="320" height="70" rx="6" fill="#1E293B" stroke="#D97706" stroke-width="1"/>
+    <text x="30" y="155" fill="#FEF3C7" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Layer 2: OpenKB Hybrid Retriever</text>
+    <text x="30" y="175" fill="#FBBF24" font-family="monospace" font-size="11">OpenKB Sidecar Client + LLM Reranker</text>
+
+    <!-- Layer 3: Core Orchestration -->
+    <rect x="15" y="215" width="320" height="70" rx="6" fill="#1E293B" stroke="#16A34A" stroke-width="1"/>
+    <text x="30" y="240" fill="#DCFCE7" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Layer 3: RAG Orchestrator</text>
+    <text x="30" y="260" fill="#4ADE80" font-family="monospace" font-size="11">app/services/rag_pipeline.py</text>
+  </g>
+
+  <!-- COLUMN 2: Agent Engine (Layers 4-6) -->
+  <g transform="translate(425, 95)">
+    <rect x="0" y="0" width="350" height="320" rx="10" fill="url(#layer-card)" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="30" fill="#A855F7" font-family="monospace" font-size="13" font-weight="700">2. AGENTIC HARNESS H = (E,T,C,S,L,V)</text>
+
+    <!-- Layer 4: Context & Prompt Registry -->
+    <rect x="15" y="45" width="320" height="70" rx="6" fill="#1E293B" stroke="#9333EA" stroke-width="1"/>
+    <text x="30" y="70" fill="#F3E8FF" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Layer 4 (C &amp; S): Context &amp; State</text>
+    <text x="30" y="90" fill="#C084FC" font-family="monospace" font-size="11">context_manager.py &amp; state_store.py</text>
+
+    <!-- Layer 5: Pub/Sub Hooks -->
+    <rect x="15" y="130" width="320" height="70" rx="6" fill="#1E293B" stroke="#C084FC" stroke-width="1"/>
+    <text x="30" y="155" fill="#F3E8FF" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Layer 5 (L): Lifecycle Hooks</text>
+    <text x="30" y="175" fill="#E9D5FF" font-family="monospace" font-size="11">hooks.py (on_tool_execute, on_llm_call)</text>
+
+    <!-- Layer 6: ReAct Agent Loop -->
+    <rect x="15" y="215" width="320" height="70" rx="6" fill="#1E293B" stroke="#EC4899" stroke-width="1"/>
+    <text x="30" y="240" fill="#FCE7F3" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Layer 6 (E &amp; T): ReAct Engine</text>
+    <text x="30" y="260" fill="#F472B6" font-family="monospace" font-size="11">executor.py &amp; tools/registry.py</text>
+  </g>
+
+  <!-- COLUMN 3: Guardrails, Security & Eval (Layers 7-9) -->
+  <g transform="translate(810, 95)">
+    <rect x="0" y="0" width="350" height="320" rx="10" fill="url(#layer-card)" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="30" fill="#F43F5E" font-family="monospace" font-size="13" font-weight="700">3. SECURITY, EVAL &amp; DEVSECOPS</text>
+
+    <!-- Layer 7: Guardrails & Circuit Breakers -->
+    <rect x="15" y="45" width="320" height="70" rx="6" fill="#1E293B" stroke="#E11D48" stroke-width="1"/>
+    <text x="30" y="70" fill="#FFE4E6" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Layer 7: Security Guardrails</text>
+    <text x="30" y="90" fill="#FB7185" font-family="monospace" font-size="11">auth.py, resilience.py, content_filter</text>
+
+    <!-- Layer 8: Observability & Eval -->
+    <rect x="15" y="130" width="320" height="70" rx="6" fill="#1E293B" stroke="#059669" stroke-width="1"/>
+    <text x="30" y="155" fill="#D1FAE5" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Layer 8 (V): Observability &amp; Eval</text>
+    <text x="30" y="175" fill="#34D399" font-family="monospace" font-size="11">tracer.py, trajectory_logger, offline_eval</text>
+
+    <!-- Layer 9: CI/CD & Agent Guidelines -->
+    <rect x="15" y="215" width="320" height="70" rx="6" fill="#1E293B" stroke="#6366F1" stroke-width="1"/>
+    <text x="30" y="240" fill="#E0E7FF" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Layer 9: DevSecOps &amp; CI Rules</text>
+    <text x="30" y="260" fill="#818CF8" font-family="monospace" font-size="11">.github/workflows/ci.yml &amp; AGENTS.md</text>
+  </g>
+</svg>
