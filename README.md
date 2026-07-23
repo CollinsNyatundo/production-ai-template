@@ -11,9 +11,10 @@
   <img src="https://img.shields.io/badge/mypy-strict%2C%20zero%20Any-4ADE80.svg" alt="mypy strict, zero Any">
   <img src="https://img.shields.io/badge/NVIDIA%20NIM-nv--embedqa--e5--v5-76B900.svg" alt="NVIDIA NIM Embeddings">
   <img src="https://img.shields.io/badge/OpenKB-Sidecar%20Integration-F59E0B.svg" alt="OpenKB Sidecar">
+  <img src="https://img.shields.io/badge/Headroom-Reversible%20Context%20Crusher-EC4899.svg" alt="Headroom Compression">
 </p>
 
-A production-grade, resilient, multi-tenant AI agent backend template built with **FastAPI**, **NVIDIA NIM**, and **OpenKB**. Designed around a **9-Layer Architecture** and a formal **Agent Harness Taxonomy** $\mathcal{H} = (E, T, C, S, L, V)$, this repository provides real-world infrastructure around LLM reasoning: asynchronous circuit breakers, zero-`Any` strict static typing, tenant-scoped session security, and automated trajectory quality evaluation.
+A production-grade, resilient, multi-tenant AI agent backend template built with **FastAPI**, **NVIDIA NIM**, **OpenKB**, and **Headroom**. Designed around a **9-Layer Architecture** and a formal **Agent Harness Taxonomy** $\mathcal{H} = (E, T, C, S, L, V)$, this repository provides real-world infrastructure around LLM reasoning: asynchronous circuit breakers, reversible context compression, zero-`Any` strict static typing, tenant-scoped session security, and automated trajectory quality evaluation.
 
 ---
 
@@ -21,11 +22,12 @@ A production-grade, resilient, multi-tenant AI agent backend template built with
 
 | Feature Component | Implementation Status | Tech Stack & Mechanism |
 | :--- | :--- | :--- |
-| **LLM Reasoning & Tool Calling** | ✅ **100% Production Real** | Powered by NVIDIA NIM (`meta/llama-3.1-70b-instruct`) via OpenAI-compatible SDK with automatic 5x exponential retry backoff. |
+| **LLM Reasoning & Tool Calling** | ✅ **100% Production Real** | Powered by NVIDIA NIM (`meta/llama-3.1-70b-instruct`) via OpenAI-compatible SDK with automatic exponential retry backoff. |
+| **Context Compression & Crusher** | ✅ **100% Production Real** | Integrated **Headroom Context Adapter** ([headroom_adapter.py](file:///d:/Projects/ai_template/app/services/headroom_adapter.py)) with in-process JSON payload crushing and reversible `expand_context` tool. |
 | **Hybrid Knowledge Base (RAG)** | ✅ **100% Production Real** | Integrated **OpenKB Sidecar Client** ([openkb_client.py](file:///d:/Projects/ai_template/app/components/openkb_client.py)) supporting vector + BM25 search & LLM relevance reranking. |
 | **Embeddings & Vector Pipeline** | ✅ **100% Production Real** | NVIDIA NIM `nvidia/nv-embedqa-e5-v5` (1024-dim, 8k context window). |
 | **Resilience & Fault Tolerance** | ✅ **100% Production Real** | [AsyncCircuitBreaker](file:///d:/Projects/ai_template/app/security/resilience.py) wrapping LLM and Tool execution paths with graceful fallback. |
-| **Strict Type Safety** | ✅ **100% Production Real** | Strict `mypy` enforcement (`disallow_any_generics` + `warn_return_any`) ensuring zero implicit `Any` across 53 source files. |
+| **Strict Type Safety** | ✅ **100% Production Real** | Strict `mypy` enforcement (`disallow_any_generics` + `warn_return_any`) ensuring zero implicit `Any` across 55 source files. |
 | **Multi-Tenant Security** | ✅ **100% Production Real** | Server-side JWT role validation and automatic tenant-prefixed session isolation (`tenant_id:session_id`). |
 | **Observability & Tracing** | ✅ **100% Production Real** | OpenTelemetry context propagation (`tenant.id` / `user.id`), LangSmith tracing, and token cost tracking. |
 | **Quality Evaluation** | ✅ **100% Production Real** | Active trajectory logging and automated JSONL concept recall evaluation runner ([offline_eval.py](file:///d:/Projects/ai_template/evaluation/offline_eval.py)). |
@@ -94,9 +96,10 @@ production-ai-template/
 │   │   └── reranker.py            # Batched LLM Document Relevance Reranker
 │   ├── services/                  # Layer 3 & 4: Core Orchestration, Memory & State
 │   │   ├── rag_pipeline.py        # Pipeline Orchestrator with Circuit Breaker Guards
+│   │   ├── headroom_adapter.py    # Headroom In-Process Reversible Context Crusher
 │   │   ├── llm_client.py          # NVIDIA NIM (AsyncOpenAI) Client with Retries & LangSmith
 │   │   ├── state_store.py         # Async SQLAlchemy Database State Store
-│   │   ├── context_manager.py     # Token Budgeting & Truncation Manager
+│   │   ├── context_manager.py     # Token Budgeting & Headroom Compression Manager
 │   │   ├── hooks.py               # Asynchronous Pub/Sub Lifecycle Event Hooks
 │   │   └── query_rewriter.py      # Conversation-Aware LLM Query Rewriter
 │   ├── agents/                    # Layer 6 (E & T): Agentic ReAct Engine
@@ -105,7 +108,7 @@ production-ai-template/
 │   │   ├── query_decomposer.py    # Multi-Part Query Checklist Generator
 │   │   ├── document_grader.py     # Heuristic Document Relevance Grader
 │   │   └── tools/                 # Tool Registry & Definitions
-│   │       ├── registry.py        # Scope Validation & Signature Auto-Schema
+│   │       ├── registry.py        # Scope Validation, Signatures & expand_context Tool
 │   │       ├── vector_search.py   # Hybrid Vector Search Tool
 │   │       ├── web_search.py      # External Web Search Tool
 │   │       └── code_search.py     # Repository Tree Search Tool
@@ -140,12 +143,12 @@ This template implements the six-component agent harness taxonomy $\mathcal{H} =
 
 ### 2. T — Tool Registry
 * **File:** [app/agents/tools/registry.py](file:///d:/Projects/ai_template/app/agents/tools/registry.py)
-* **Design:** Centralized tool registrar that generates JSON parameter schemas via Python signature introspection.
+* **Design:** Centralized tool registrar that generates JSON parameter schemas via Python signature introspection. Registers `expand_context` for on-demand reversible context expansion.
 * **Security Gating:** Enforces server-side permission levels (`high` vs `low`) mapped from decrypted JWT or API Key tokens.
 
-### 3. C — Context Manager
-* **File:** [app/services/context_manager.py](file:///d:/Projects/ai_template/app/services/context_manager.py)
-* **Design:** Manages context windows by counting tokens via `tiktoken` (or fallback character estimators) and dynamically packing/truncating documents to stay strictly within configured token budgets.
+### 3. C — Context Manager & Compression
+* **File:** [app/services/context_manager.py](file:///d:/Projects/ai_template/app/services/context_manager.py) & [app/services/headroom_adapter.py](file:///d:/Projects/ai_template/app/services/headroom_adapter.py)
+* **Design:** Manages context windows by counting tokens via `tiktoken` and reversibly crushing payload ASTs using Headroom `SmartCrusher`.
 
 ### 4. S — State Store
 * **File:** [app/services/state_store.py](file:///d:/Projects/ai_template/app/services/state_store.py)
