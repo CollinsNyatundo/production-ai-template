@@ -59,7 +59,7 @@ class LLMClient:
                 api_key=settings.nvidia_api_key,
                 base_url=settings.nvidia_base_url,
                 timeout=settings.llm_request_timeout_s,
-                max_retries=5,
+                max_retries=1,
             )
             if _TRACING_ENABLED:
                 # Deferred import: langsmith is only needed when tracing is on.
@@ -86,6 +86,7 @@ class LLMClient:
         tool_choice: Optional[str] = None,
         temperature: float = 0.2,
         max_tokens: int = 1024,
+        model: Optional[str] = None,
     ) -> ChatCompletion:
         if not self._configured or self._client is None:
             raise LLMNotConfiguredError("NVIDIA_API_KEY is not configured. Set it in .env to enable real LLM calls.")
@@ -96,15 +97,11 @@ class LLMClient:
             if first_msg.get("role") == "system" and first_msg.get("content"):
                 first_msg["content"] = str(first_msg["content"]).strip()
 
-        # openai's SDK types `messages`/`tools` as a discriminated union of
-        # per-role/per-tool-type TypedDicts (far more granular than needed here);
-        # our ChatMessage/ToolSchema are intentionally the looser wire-format
-        # shape shared across all providers speaking this protocol. Structurally
-        # identical at the JSON level the API actually consumes - this is a
-        # single, narrow suppression at the SDK boundary, not a blanket Any.
+        target_model = model or settings.nvidia_model
+
         if tools:
             return await self._client.chat.completions.create(  # type: ignore[call-overload, arg-type, no-any-return]
-                model=settings.nvidia_model,
+                model=target_model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -112,7 +109,7 @@ class LLMClient:
                 tool_choice=tool_choice or "auto",
             )
         return await self._client.chat.completions.create(
-            model=settings.nvidia_model,
+            model=target_model,
             messages=messages,  # type: ignore[arg-type]
             temperature=temperature,
             max_tokens=max_tokens,

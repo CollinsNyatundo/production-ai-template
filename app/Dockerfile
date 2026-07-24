@@ -9,7 +9,8 @@ COPY pyproject.toml poetry.lock* /build/
 
 # Do not install the root package, only dependencies
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-root --no-interaction --no-ansi --only main
+    && poetry install --no-root --no-interaction --no-ansi --only main \
+    && pip install --no-cache-dir python-multipart httpx
 
 # Pre-download tiktoken's BPE encoding files at build time. Without this, the
 # first token-count call in a running container fetches them from
