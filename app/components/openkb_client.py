@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
