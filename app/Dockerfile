@@ -31,6 +31,8 @@ COPY --from=builder /build/.tiktoken_cache /workspace/.tiktoken_cache
 ENV TIKTOKEN_CACHE_DIR=/workspace/.tiktoken_cache
 
 COPY app /workspace/app
+COPY evaluation /workspace/evaluation
+COPY observability /workspace/observability
 COPY README.md /workspace/
 
 ENV PORT=8000
