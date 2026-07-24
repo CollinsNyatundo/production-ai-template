@@ -49,9 +49,6 @@ class OpenKBClient:
 
     async def query(self, query_str: str, limit: int = 5) -> List[Dict[str, Any]]:
         logger.info(f"Querying OpenKB: {query_str}")
-        if os.getenv("SKIP_OPENKB") == "true" or os.getenv("CI") == "true":
-            logger.info("Skipping OpenKB in CI environment, using fallback.")
-            return []
         payload = {"query": query_str, "limit": limit}
         res = await self._post_json("/api/v1/query", payload)
         if isinstance(res, dict) and "results" in res:
