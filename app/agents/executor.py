@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from langsmith import traceable
 from openai.types.chat import ChatCompletion, ChatCompletionMessageFunctionToolCall
@@ -43,7 +43,7 @@ class AgentExecutor:
 
     @traceable(name="AgentExecutor.execute_trajectory", run_type="chain")
     async def execute_trajectory(
-        self, session_id: str, query: str, actor_permission: str = "low"
+        self, session_id: str, query: str, actor_permission: str = "low", model: Optional[str] = None
     ) -> AgentExecutionResult:
         await lifecycle_hooks.emit("on_agent_start", session_id=session_id, query=query)
 
@@ -91,6 +91,7 @@ class AgentExecutor:
                     messages,
                     tools=None if is_final_turn else tools,
                     tool_choice=("none" if is_final_turn else "auto"),
+                    model=model,
                 )
             except Exception as e:
                 logger.error(f"LLM call failed for session '{session_id}': {e}")

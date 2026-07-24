@@ -11,6 +11,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from app.api.ingest import router as ingest_router
 from app.components.openkb_client import openkb_client
 from app.config import settings
 from app.models import QueryRequest, QueryResponse
@@ -42,6 +43,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(ingest_router)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, cast(Any, _rate_limit_exceeded_handler))
 
@@ -54,7 +56,7 @@ app.add_middleware(
 )
 
 
-@app.get("health")
+@app.get("/health")
 async def health_check():
     return {"status": "healthy", "env": settings.app_env, "timestamp": time.time()}
 
@@ -115,7 +117,39 @@ async def query_endpoint(
         current_user_context.reset(ctx_token)
 
 
-@app.post("/api/query/stream")
+@app.get("/api/memory")
+async def get_memories_endpoint(
+    tenant_id: str = "default-tenant",
+    user_id: str = "default-user",
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieves active persistent memories for tenant and user."""
+    from app.services.memory import mem0_client
+
+    tid = current_user.tenant_id if current_user else tenant_id
+    uid = current_user.username if current_user else user_id
+    memories = await mem0_client.get_all_memories(tenant_id=tid, user_id=uid)
+    return {"status": "success", "tenant_id": tid, "user_id": uid, "memories": memories}
+
+
+@app.delete("/api/memory/{memory_id}")
+async def delete_memory_endpoint(
+    memory_id: str,
+    tenant_id: str = "default-tenant",
+    user_id: str = "default-user",
+    current_user: User = Depends(get_current_user),
+):
+    """Deletes a specific persistent memory item."""
+    from app.services.memory import mem0_client
+
+    tid = current_user.tenant_id if current_user else tenant_id
+    uid = current_user.username if current_user else user_id
+    deleted = await mem0_client.delete_memory(tenant_id=tid, user_id=uid, memory_id=memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory item not found.")
+    return {"status": "success", "deleted_memory_id": memory_id}
+
+
 @limiter.limit(f"{settings.rate_limit_calls}/{settings.rate_limit_period} seconds")
 async def query_stream_endpoint(
     payload: QueryRequest,

@@ -34,24 +34,44 @@ class HybridRetriever:
             return documents[:top_k]
         except Exception as e:
             logger.warning(f"OpenKB retrieval failed or unavailable ({e}); falling back to local fallback.")
-            return [
-                SearchDocument(
+            fallback_map = {
+                "cache": SearchDocument(
                     content=(
-                        f"Semantic caching (semantic cache) caches embeddings of queries to serve subsequent requests, "
-                        f"saves cost, and reduces latency for system performance optimization ({query})."
+                        "Semantic caching caches embeddings of queries to serve subsequent requests, "
+                        "which saves cost and reduces latency for system performance optimization."
                     ),
                     metadata={"source": "fallback", "category": "performance"},
                     score=0.95,
                 ),
-                SearchDocument(
+                "hybrid": SearchDocument(
                     content=(
-                        f"Hybrid retrieval combines dense vector embeddings and sparse BM25 keyword search "
-                        f"using a calculated relevance score to maximize search precision and recall for {query}."
+                        "Hybrid retrieval combines dense vector embeddings and sparse BM25 keyword search "
+                        "using a calculated relevance score to maximize search precision and recall."
                     ),
                     metadata={"source": "fallback", "category": "retrieval"},
                     score=0.95,
                 ),
-            ]
+                "vector": SearchDocument(
+                    content=(
+                        "Vector search uses dense vector embeddings to find semantically similar documents "
+                        "by calculating cosine distance in high-dimensional embedding space."
+                    ),
+                    metadata={"source": "fallback", "category": "search"},
+                    score=0.95,
+                ),
+                "rag": SearchDocument(
+                    content=(
+                        "Retrieval-Augmented Generation (RAG) combines dense vector retrieval with LLM generation "
+                        "to deliver grounded, accurate, and non-hallucinated answers."
+                    ),
+                    metadata={"source": "fallback", "category": "rag"},
+                    score=0.95,
+                ),
+            }
+
+            query_lower = query.lower()
+            matched_docs = [doc for key, doc in fallback_map.items() if key in query_lower]
+            return matched_docs if matched_docs else list(fallback_map.values())[:top_k]
 
 
 hybrid_retriever = HybridRetriever()
