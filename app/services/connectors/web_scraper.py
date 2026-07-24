@@ -26,9 +26,9 @@ class SimpleTextExtractor(HTMLParser):
             if cleaned:
                 self.text_parts.append(cleaned + " ")
 
-    def get_text(self):
+    def get_text(self) -> str:
         full_text = "".join(self.text_parts)
-        return re.sub(r"\n\s*\n", "\n\n", full_text).strip()
+        return str(re.sub(r"\n\s*\n", "\n\n", full_text).strip())
 
 
 async def scrape_web_url(url: str) -> str:
@@ -41,7 +41,7 @@ async def scrape_web_url(url: str) -> str:
 
     parser = SimpleTextExtractor()
     parser.feed(resp.text)
-    extracted = parser.get_text()
+    extracted: str = str(parser.get_text())
 
     if not extracted:
         extracted = f"Web content from {url}"

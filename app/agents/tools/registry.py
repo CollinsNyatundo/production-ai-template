@@ -1,6 +1,6 @@
 import inspect
 import logging
-from typing import Awaitable, Callable, Dict, List, TypedDict, Union
+from typing import Awaitable, Callable, Dict, List, Optional, TypedDict, Union
 
 from app.models import SearchDocument
 from app.types import JSONValue, ToolFunctionSchema
@@ -81,6 +81,9 @@ class ToolRegistry:
 
     def get_tool_schemas(self) -> List[ToolFunctionSchema]:
         return [t["schema"] for t in self._tools.values()]
+
+    def get_tool(self, name: str) -> Optional[RegisteredTool]:
+        return self._tools.get(name)
 
     async def execute_tool(
         self, name: str, args: Dict[str, JSONValue], actor_permission: str = "low"

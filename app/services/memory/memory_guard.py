@@ -1,11 +1,11 @@
 import re
-from typing import List, Tuple
+from typing import List, Pattern, Tuple
 
 
 class MemoryGuard:
     """Adversarial Security Guard that filters prompt injections, secrets, and system instructions from memory."""
 
-    DANGEROUS_PATTERNS: List[re.Pattern] = [
+    DANGEROUS_PATTERNS: List[Pattern[str]] = [
         re.compile(r"ignore\s+(all\s+)?(previous\s+)?instructions", re.IGNORECASE),
         re.compile(r"system\s+prompt", re.IGNORECASE),
         re.compile(r"grant\s+admin", re.IGNORECASE),

@@ -59,14 +59,15 @@ class CandidatesCrossoverEngine:
         search_tool = tool_registry.get_tool("search_documents")
         if search_tool:
             try:
-                raw_res = await search_tool.execute(query=query)
-                results_list = raw_res.get("results", [])
+                res = await tool_registry.execute_tool("search_documents", {"query": query})
                 extracted = []
-                for item in results_list[:2]:
-                    content = str(item.get("content", ""))
-                    source = str(item.get("source", vector_label))
-                    if content:
+                if isinstance(res, list):
+                    for item in res[:2]:
+                        content = getattr(item, "text", str(item))
+                        source = getattr(item, "doc_id", vector_label)
                         extracted.append((content, source))
+                elif isinstance(res, str) and res:
+                    extracted.append((res, vector_label))
                 if extracted:
                     return extracted
             except Exception:

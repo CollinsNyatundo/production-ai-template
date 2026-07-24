@@ -1,12 +1,12 @@
 import asyncio
 import time
 import uuid
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.services.connectors.web_scraper import scrape_web_url
 
-INGESTION_JOBS: Dict[str, dict] = {}
-ACTIVE_COLLECTIONS: Dict[str, dict] = {
+INGESTION_JOBS: Dict[str, Dict[str, Any]] = {}
+ACTIVE_COLLECTIONS: Dict[str, Dict[str, Any]] = {
     "col-default-openkb": {
         "id": "col-default-openkb",
         "name": "OpenKB Core Knowledge Base",
@@ -35,11 +35,11 @@ def create_ingestion_job(source_type: str, uri: str, tenant_id: str, collection_
     return job_id
 
 
-def get_job_status(job_id: str) -> Optional[dict]:
+def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     return INGESTION_JOBS.get(job_id)
 
 
-def list_collections(tenant_id: str) -> List[dict]:
+def list_collections(tenant_id: str) -> List[Dict[str, Any]]:
     return [col for col in ACTIVE_COLLECTIONS.values() if col.get("tenant_id") == tenant_id or tenant_id == "all"]
 
 
