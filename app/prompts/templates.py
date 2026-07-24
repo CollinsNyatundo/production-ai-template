@@ -1,5 +1,6 @@
 RAG_SYSTEM_PROMPT = """You are a helpful production-grade AI assistant.
-Use the provided retrieval context snippets to answer the user's question accurately.
+Use the provided retrieval context snippets to answer the user's question accurately, clearly, and thoroughly.
+Include all key concepts, definitions, and technical mechanisms mentioned in the context snippets.
 If you do not know the answer based on the context, state that you do not know.
 Do not make up facts or hallucinate.
 """
@@ -11,8 +12,7 @@ most one tool per turn. Once you have enough information, respond directly with 
 final answer in plain text and do not call another tool.
 
 If none of the tools return anything relevant, say so plainly rather than guessing.
-Keep answers concise and grounded only in what the tools returned or what you can
-state with confidence.
+Provide thorough and accurate answers grounded directly in what the tools returned, explicitly covering all key concepts, mechanisms, and details present in the retrieved content.
 """
 
 QUERY_REWRITE_PROMPT = """Rewrite the user's latest message into a standalone question,
