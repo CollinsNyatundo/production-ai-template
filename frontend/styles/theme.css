@@ -1,0 +1,204 @@
+/* =============================================================================
+   Nexus AI — Enterprise Workspace Design System Theme Tokens & CSS
+   ============================================================================= */
+
+:root {
+    --bg-base: #0D0E12;
+    --bg-surface: #15161C;
+    --bg-elevated: #1D1F27;
+    --border-subtle: #2A2C38;
+    --border-hover: #3F4254;
+    --accent-indigo: #6366F1;
+    --accent-indigo-hover: #4F46E5;
+    --accent-cyan: #38BDF8;
+    --accent-emerald: #10B981;
+    --accent-amber: #F59E0B;
+    --text-primary: #F9FAFB;
+    --text-secondary: #9CA3AF;
+    --text-muted: #6B7280;
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --radius-card: 16px;
+    --radius-pill: 20px;
+    --radius-sm: 8px;
+    --shadow-main: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+
+/* Base App Background & Typography */
+.stApp {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+}
+
+/* Clean Header/Footer Removals */
+#MainMenu, footer, header {
+    visibility: hidden;
+}
+
+/* Sidebar Styling */
+section[data-testid="stSidebar"] {
+    background-color: var(--bg-surface);
+    border-right: 1px solid var(--border-subtle);
+}
+
+/* Hero Title Section */
+.hero-container {
+    text-align: center;
+    padding-top: 2.5rem;
+    padding-bottom: 1.2rem;
+}
+.hero-sub {
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-cyan);
+    margin-bottom: 0.5rem;
+}
+.hero-title {
+    font-size: 2.4rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+    margin-bottom: 1.5rem;
+}
+
+/* Unified Main Prompt Card */
+div[data-testid="stForm"] {
+    background-color: var(--bg-surface) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-card) !important;
+    padding: 18px 22px !important;
+    box-shadow: var(--shadow-main) !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+div[data-testid="stForm"]:focus-within {
+    border-color: var(--accent-indigo) !important;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2), var(--shadow-main) !important;
+}
+
+/* Transparent Text Area Inside Unified Prompt Card */
+div[data-testid="stForm"] div.stTextArea textarea {
+    background-color: transparent !important;
+    border: none !important;
+    color: var(--text-primary) !important;
+    font-size: 1.05rem !important;
+    font-family: var(--font-sans) !important;
+    box-shadow: none !important;
+    resize: none !important;
+    padding: 0 !important;
+}
+div[data-testid="stForm"] div.stTextArea textarea:focus {
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Form Buttons & Selectors */
+div[data-testid="stForm"] button {
+    background-color: var(--bg-elevated) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-pill) !important;
+    color: var(--text-primary) !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    padding: 6px 14px !important;
+    transition: all 0.15s ease !important;
+}
+div[data-testid="stForm"] button:hover {
+    background-color: var(--border-subtle) !important;
+    border-color: var(--border-hover) !important;
+    color: #FFFFFF !important;
+}
+
+/* Submit Action Button */
+div[data-testid="stForm"] button[kind="primary"] {
+    background-color: var(--accent-indigo) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    font-weight: 600 !important;
+}
+div[data-testid="stForm"] button[kind="primary"]:hover {
+    background-color: var(--accent-indigo-hover) !important;
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.4) !important;
+}
+
+/* Floating Popovers */
+div[data-testid="stPopoverBody"] {
+    background-color: var(--bg-elevated) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 12px !important;
+    padding: 14px !important;
+    color: var(--text-primary) !important;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Centered Dialog Modals */
+div[data-testid="stDialog"] {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+div[data-testid="stDialog"] > div {
+    background-color: var(--bg-surface) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-card) !important;
+    box-shadow: var(--shadow-main) !important;
+    color: var(--text-primary) !important;
+    max-width: 90vw !important;
+}
+
+/* Badges & Pills */
+.skill-pill {
+    display: inline-block;
+    background-color: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    color: var(--accent-cyan);
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 12px;
+    margin-right: 6px;
+    margin-bottom: 6px;
+}
+
+.badge-openkb {
+    background-color: rgba(56, 189, 248, 0.15);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    color: var(--accent-cyan);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.badge-web {
+    background-color: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: var(--accent-emerald);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.badge-code {
+    background-color: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: var(--accent-amber);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Trajectory Turn Component */
+.trajectory-turn {
+    background-color: var(--bg-base);
+    border-left: 3px solid var(--accent-indigo);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    padding: 10px 14px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--text-primary);
+}
