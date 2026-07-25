@@ -1,0 +1,58 @@
+# Git & VCS
+.git/
+.github/
+.gitignore
+
+# Environment configurations and secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments & build artifacts
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+build/
+dist/
+*.egg-info/
+
+# Testing & Quality Tool Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Local databases & logs
+app.db
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# AI Assistant & IDE metadata
+.claude/
+.gitnexus/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation, Media & Assets not needed in runtime images
+docs/
+assets/
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Evaluation output artifacts
+evaluation/eval_results/*
+!evaluation/eval_results/.gitkeep
+offline_eval_report.json

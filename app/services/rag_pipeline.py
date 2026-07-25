@@ -14,15 +14,17 @@ from app.agents.tools.vector_search import vector_search_tool
 from app.agents.tools.web_search import web_search_tool
 from app.components.reranker import reranker
 from app.config import settings
-from app.models import AgentStep, QueryRequest, QueryResponse
+from app.models import AgentStep, QueryRequest, QueryResponse, SearchDocument
 from app.prompts.registry import prompt_registry
 from app.security.input_guard import input_guard
 from app.security.output_filter import output_filter
 from app.security.resilience import llm_breaker
 from app.services.context_manager import context_manager
 from app.services.conversation import conversation_service
+from app.services.deep_research import DeepResearchOrchestrator
 from app.services.hooks import lifecycle_hooks
 from app.services.llm_client import llm_client
+from app.services.memory import memory_manager
 from app.services.query_rewriter import query_rewriter
 from app.services.semantic_cache import semantic_cache
 from app.types import AgentTrajectoryStep, TokenUsage
@@ -86,6 +88,34 @@ class RAGPipeline:
                     span.set_attribute("cache_hit", True)
                     return cached_response
 
+            # 2b. Deep Research Mode Branching
+            if payload.search_mode and "deep" in payload.search_mode.lower():
+                logger.info(f"Routing session '{payload.session_id}' to Deep Research Orchestrator.")
+                deep_orchestrator = DeepResearchOrchestrator(max_depth=payload.research_depth or 3)
+                deep_res = await deep_orchestrator.execute(query=payload.query, session_id=payload.session_id)
+
+                pydantic_sources = [
+                    SearchDocument(content=s["content"], metadata=s["metadata"], score=0.9)
+                    for s in deep_res.get("sources", [])
+                ]
+
+                pydantic_trajectory = [
+                    AgentStep(
+                        turn=stg.get("turn", idx + 1),
+                        thought="Deep Research Reflection & Crossover",
+                        tool="CandidatesCrossoverEngine",
+                        arguments={},
+                        observation=f"Novel facts merged: {stg.get('novel_facts_merged', 0)}",
+                    )
+                    for idx, stg in enumerate(deep_res.get("trajectory", []))
+                ]
+
+                return QueryResponse(
+                    answer=deep_res["answer"],
+                    sources=pydantic_sources,
+                    trajectory=pydantic_trajectory,
+                )
+
             # 3. Retrieve Session History
             history = await conversation_service.get_history(payload.session_id)
             history_str = " ".join([m["content"] for m in history[-3:]])
@@ -126,7 +156,9 @@ class RAGPipeline:
                     session_id=payload.session_id,
                     query=agent_query,
                     actor_permission=payload.actor_permission,
+                    model=payload.model,
                 )
+
                 raw_trajectory = run_result["trajectory"]
                 final_answer = run_result["final_answer"]
                 token_usage = run_result["token_usage"]
@@ -169,7 +201,16 @@ class RAGPipeline:
             await conversation_service.add_message(payload.session_id, "user", payload.query)
             await conversation_service.add_message(payload.session_id, "assistant", final_answer)
 
+            # 9b. Trigger Async Out-of-Band Memory Extraction
+            memory_manager.trigger_async_extraction(
+                tenant_id=payload.tenant_id or "default-tenant",
+                user_id=payload.user_id or "default-user",
+                user_query=payload.query,
+                assistant_response=final_answer,
+            )
+
             # 10. Cache response
+
             if payload.use_cache:
                 await semantic_cache.set(payload.query, final_answer, packed_docs)
 

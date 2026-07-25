@@ -13,6 +13,13 @@ class QueryRequest(BaseModel):
     )
     use_cache: bool = Field(default=True, description="Flag to bypass or use the semantic cache.")
     actor_permission: str = Field(default="low", description="Authorization level of the calling user.")
+    model: Optional[str] = Field(default=None, description="Selected NVIDIA NIM model identifier.")
+    search_mode: Optional[str] = Field(
+        default="search", description="Search execution mode (e.g. search, deep_research)."
+    )
+    research_depth: Optional[int] = Field(default=3, description="Maximum reflection depth for deep research.")
+    tenant_id: Optional[str] = Field(default="default-tenant", description="Tenant ID scope for isolation.")
+    user_id: Optional[str] = Field(default="default-user", description="User ID scope for memory.")
 
 
 class SearchDocument(BaseModel):

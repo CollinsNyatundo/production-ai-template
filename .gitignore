@@ -41,3 +41,5 @@ dist/
 build/
 *.egg-info/
 .docker-compose.local.env
+.coverage
+.coverage.*
