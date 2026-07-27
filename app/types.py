@@ -10,13 +10,14 @@ Any: mypy will reject e.g. calling a string method on a JSONValue without a
 type-narrowing check first, whereas Any disables checking entirely.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypeAlias, TypedDict, Union
 
 if TYPE_CHECKING:
     from app.models import SearchDocument
 
 JSONPrimitive = Union[str, int, float, bool, None]
-JSONValue = Any
+JSONValue: TypeAlias = Any
+JSONDict: TypeAlias = Dict[str, JSONValue]
 
 
 # ---------------------------------------------------------------------------

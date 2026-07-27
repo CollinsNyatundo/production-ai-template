@@ -1,5 +1,4 @@
 import logging
-from typing import Any, Dict
 
 from app.services.deep_research.adversarial import (
     CrossDomainStressTester,
@@ -10,6 +9,7 @@ from app.services.deep_research.global_context import GlobalResearchContext
 from app.services.deep_research.planner import ResearchPlanner
 from app.services.deep_research.reflector import PlanReflector
 from app.services.deep_research.synthesizer import OneShotReportSynthesizer
+from app.types import JSONDict
 
 logger = logging.getLogger("app.services.deep_research.orchestrator")
 
@@ -26,7 +26,7 @@ class DeepResearchOrchestrator:
         self.premise_red_teamer = PremiseRedTeamer()
         self.stress_tester = CrossDomainStressTester()
 
-    async def execute(self, query: str, session_id: str) -> Dict[str, Any]:
+    async def execute(self, query: str, session_id: str) -> JSONDict:
         """Executes the full Deep Research loop."""
         logger.info(f"Starting Deep Research for session '{session_id}': '{query}'")
         grc = GlobalResearchContext(original_query=query)

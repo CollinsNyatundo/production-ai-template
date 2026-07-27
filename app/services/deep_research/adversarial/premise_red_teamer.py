@@ -1,12 +1,11 @@
-from typing import Any, Dict
-
 from app.services.llm_client import llm_client
+from app.types import JSONDict
 
 
 class PremiseRedTeamer:
     """Adversarial Agent 1: Attacks load-bearing assumptions in the research query."""
 
-    async def analyze_premises(self, query: str) -> Dict[str, Any]:
+    async def analyze_premises(self, query: str) -> JSONDict:
         """Analyzes query for implicit assumptions and categorizes into Tigers, Paper Tigers, and Elephants."""
         prompt = (
             f"You are a fierce Adversarial Red-Team Research Agent.\n"
