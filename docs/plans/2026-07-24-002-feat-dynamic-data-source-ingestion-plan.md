@@ -8,7 +8,7 @@ status: active
 # Technical Plan: Dynamic Data Source Ingestion & Live Vector Syncing
 
 ## 1. Problem Frame & Origin
-This technical plan establishes the implementation breakdown for the **Dynamic Data Source Ingestion Drawer** defined in [docs/brainstorms/2026-07-24-dynamic-data-source-ingestion-requirements.md](file:///d:/Projects/ai_template/docs/brainstorms/2026-07-24-dynamic-data-source-ingestion-requirements.md).
+This technical plan establishes the implementation breakdown for the **Dynamic Data Source Ingestion Drawer** defined in [docs/brainstorms/2026-07-24-dynamic-data-source-ingestion-requirements.md](../brainstorms/2026-07-24-dynamic-data-source-ingestion-requirements.md).
 
 Currently, `app/services/rag_pipeline.py` supports vector searching, but there are no backend API endpoints or frontend UI controls to ingest new documents, connect web URLs/GitHub repos, or monitor embedding progress.
 

@@ -8,7 +8,7 @@ status: active
 # Technical Plan: Nexus AI Chat Frontend Experience Overhaul
 
 ## 1. Problem Frame & Origin
-This plan establishes the technical implementation details for the chat frontend redesign specified in [docs/brainstorms/2026-07-24-chat-frontend-redesign-requirements.md](file:///d:/Projects/ai_template/docs/brainstorms/2026-07-24-chat-frontend-redesign-requirements.md). 
+This plan establishes the technical implementation details for the chat frontend redesign specified in [docs/brainstorms/2026-07-24-chat-frontend-redesign-requirements.md](../brainstorms/2026-07-24-chat-frontend-redesign-requirements.md). 
 
 Currently, the single-column Streamlit chat layout forces excessive vertical scrolling when viewing long code blocks or architectural specs. Users must also manually navigate a 78-skill modal for every session and inspect context sources via truncated plain text without visual relevance scoring or export options.
 
