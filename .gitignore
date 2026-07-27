@@ -43,3 +43,11 @@ build/
 .docker-compose.local.env
 .coverage
 .coverage.*
+
+# Compound Engineering local config
+.compound-engineering/*.local.yaml
+
+# Temporary scratch directory
+scratch/
+
+

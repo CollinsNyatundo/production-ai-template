@@ -6,15 +6,46 @@
 
 <p align="center">
   <a href="https://github.com/CollinsNyatundo/production-ai-template/actions/workflows/ci.yml"><img src="https://github.com/CollinsNyatundo/production-ai-template/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-4ADE80.svg" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/mypy-strict%2C%20zero%20Any-4ADE80.svg" alt="mypy strict, zero Any">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-10B981.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-38BDF8.svg" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/OpenKB-Vectorless%20RAG-10B981.svg" alt="OpenKB Vectorless RAG">
+  <img src="https://img.shields.io/badge/mypy-strict%2C%20zero%20Any-8B5CF6.svg" alt="mypy strict, zero Any">
   <img src="https://img.shields.io/badge/NVIDIA%20NIM-nv--embedqa--e5--v5-76B900.svg" alt="NVIDIA NIM Embeddings">
-  <img src="https://img.shields.io/badge/OpenKB-Sidecar%20Integration-F59E0B.svg" alt="OpenKB Sidecar">
-  <img src="https://img.shields.io/badge/Headroom-Reversible%20Context%20Crusher-EC4899.svg" alt="Headroom Compression">
+  <img src="https://img.shields.io/badge/Headroom-Reversible%20Crusher-EC4899.svg" alt="Headroom Compression">
 </p>
 
-A production-grade, resilient, multi-tenant AI agent backend template built with **FastAPI**, **NVIDIA NIM**, **OpenKB**, and **Headroom**. Designed around a **9-Layer Architecture** and a formal **Agent Harness Taxonomy** $\mathcal{H} = (E, T, C, S, L, V)$, this repository provides real-world infrastructure around LLM reasoning: asynchronous circuit breakers, reversible context compression, zero-`Any` strict static typing, tenant-scoped session security, and automated trajectory quality evaluation.
+A production-grade, resilient, multi-tenant AI agent backend template built with **FastAPI**, **OpenKB Vectorless RAG**, **NVIDIA NIM**, and **Headroom**. Designed around a **9-Layer Architecture** and a formal **Agent Harness Taxonomy** $\mathcal{H} = (E, T, C, S, L, V)$, this repository provides enterprise infrastructure around LLM reasoning: **zero vector database operational overhead**, asynchronous circuit breakers, reversible context compression, zero-`Any` strict static typing, tenant-scoped session security, and automated trajectory quality evaluation.
+
+---
+
+## 🧠 Core Innovation: OpenKB Vectorless RAG vs. Vector DBs
+
+> [!IMPORTANT]
+> **No Vector Database Required!**
+> Traditional RAG applications rely heavily on external vector databases (such as Pinecone, Qdrant, or pgvector), breaking long documents into arbitrary character chunks and performing nearest-neighbor distance searches. This template replaces vector DB infrastructure with **OpenKB** — an LLM-native knowledge compilation sidecar (VectifyAI / PageIndex architecture) that compiles raw documentation into persistent, interlinked Markdown wikis.
+
+<p align="center">
+  <img src="./assets/readme/hero_ai_figures.jpg" alt="AI Figurine Helpers Reading and Indexing Documentation" width="100%" style="border-radius: 12px; border: 1px solid #334155;"/>
+</p>
+<p align="center"><em>Friendly AI helper figurines reading, indexing, and organizing document pages into a compounding knowledge tree, retrieving instant answers for users.</em></p>
+
+### 🌟 Top 5 Benefits of OpenKB over Vector DBs
+
+1. ⚡ **Zero Vector DB Infrastructure Overhead:** Eliminates external vector database clusters (Pinecone, Qdrant, Milvus, pgvector), drastically simplifying deployment, reducing monthly cloud bills, and eliminating index sync latency.
+2. 🧠 **Compounding Knowledge Wiki vs. Fragmented Chunks:** Rather than slicing text into isolated chunk vectors that lose cross-document context, OpenKB continuously compiles unstructured documents into an interlinked Markdown wiki where knowledge compounds over time.
+3. 🌳 **PageIndex Tree-Based Reasoning:** Navigates 100+ page PDFs, technical specs, and manuals using hierarchical tree indexing (`PageIndex`) — searching documents the way a human reads a table of contents rather than relying purely on keyword/vector distance.
+4. 🔍 **Human-Readable & Obsidian-Compatible:** All knowledge outputs are stored as plain Markdown files (`.md`) complete with graph backlinks. Engineers can inspect, edit, or view the compiled knowledge base directly in PKM tools like Obsidian.
+5. 🛡️ **Lossless Structural Context:** Preserves document hierarchy, section structures, and cross-references, eliminating chunk context loss and retrieval hallucinations.
+
+### 📊 Architectural Comparison
+
+| Feature Dimension | Traditional Vector DB RAG | OpenKB Knowledge Compilation (This Template) |
+| :--- | :--- | :--- |
+| **Database Requirement** | External Vector DB (Pinecone / pgvector) | **Zero Vector DB** (Plain Markdown Wikis) |
+| **Retrieval Mechanism** | Vector similarity distance over chunks | **PageIndex Tree Indexing + BM25 + Dense Search** |
+| **Knowledge Lifecycle** | Fixed, isolated vector chunks | **Compounding interlinked Markdown wiki** |
+| **Auditability** | High-dimensional array floats (unreadable) | **Human-readable Markdown with Obsidian backlinks** |
+| **Long Document Handling** | Truncates or fragments context | **Hierarchical tree traversal over full documents** |
 
 ---
 
@@ -22,15 +53,14 @@ A production-grade, resilient, multi-tenant AI agent backend template built with
 
 | Feature Component | Implementation Status | Tech Stack & Mechanism |
 | :--- | :--- | :--- |
+| **Vectorless RAG Engine** | ✅ **100% Production Real** | Integrated **OpenKB Sidecar Client** ([openkb_client.py](app/components/openkb_client.py)) supporting compiled wiki search, tree indexing (`PageIndex`), & LLM relevance reranking. |
 | **LLM Reasoning & Tool Calling** | ✅ **100% Production Real** | Powered by NVIDIA NIM (`meta/llama-3.1-70b-instruct`) via OpenAI-compatible SDK with automatic exponential retry backoff. |
-| **Context Compression & Crusher** | ✅ **100% Production Real** | Integrated **Headroom Context Adapter** ([headroom_adapter.py](file:///d:/Projects/ai_template/app/services/headroom_adapter.py)) with in-process JSON payload crushing and reversible `expand_context` tool. |
-| **Hybrid Knowledge Base (RAG)** | ✅ **100% Production Real** | Integrated **OpenKB Sidecar Client** ([openkb_client.py](file:///d:/Projects/ai_template/app/components/openkb_client.py)) supporting vector + BM25 search & LLM relevance reranking. |
-| **Embeddings & Vector Pipeline** | ✅ **100% Production Real** | NVIDIA NIM `nvidia/nv-embedqa-e5-v5` (1024-dim, 8k context window). |
-| **Resilience & Fault Tolerance** | ✅ **100% Production Real** | [AsyncCircuitBreaker](file:///d:/Projects/ai_template/app/security/resilience.py) wrapping LLM and Tool execution paths with graceful fallback. |
-| **Strict Type Safety** | ✅ **100% Production Real** | Strict `mypy` enforcement (`disallow_any_generics` + `warn_return_any`) ensuring zero implicit `Any` across 55 source files. |
+| **Context Compression & Crusher** | ✅ **100% Production Real** | Integrated **Headroom Context Adapter** ([headroom_adapter.py](app/services/headroom_adapter.py)) with in-process AST JSON payload crushing and reversible `expand_context` tool. |
+| **Resilience & Fault Tolerance** | ✅ **100% Production Real** | [AsyncCircuitBreaker](app/security/resilience.py) wrapping LLM and Tool execution paths with graceful fallback and half-open state recovery. |
+| **Strict Type Safety** | ✅ **100% Production Real** | Strict `mypy` enforcement (`disallow_any_generics` + `warn_return_any`) ensuring zero implicit `Any` across source files. |
 | **Multi-Tenant Security** | ✅ **100% Production Real** | Server-side JWT role validation and automatic tenant-prefixed session isolation (`tenant_id:session_id`). |
-| **Observability & Tracing** | ✅ **100% Production Real** | OpenTelemetry context propagation (`tenant.id` / `user.id`), LangSmith tracing, and token cost tracking. |
-| **Quality Evaluation** | ✅ **100% Production Real** | Active trajectory logging and automated JSONL concept recall evaluation runner ([offline_eval.py](file:///d:/Projects/ai_template/evaluation/offline_eval.py)). |
+| **Observability & Tracing** | ✅ **100% Production Real** | OpenTelemetry context propagation (`tenant.id` / `user.id`), LangSmith tracing, and real-time token cost tracking. |
+| **Quality Evaluation** | ✅ **100% Production Real** | Active trajectory logging and automated JSONL concept recall evaluation runner ([offline_eval.py](evaluation/offline_eval.py)). |
 
 ---
 
@@ -66,13 +96,13 @@ Launch backend API, Streamlit client, and Redis cache:
 docker-compose up --build
 ```
 
-Send a test RAG query to the FastAPI entrypoint:
+Send a test Vectorless RAG query to the FastAPI entrypoint:
 ```bash
 curl -X POST "http://localhost:8000/api/query" \
      -H "Content-Type: application/json" \
      -H "X-API-Key: api-key-admin-12345" \
      -d '{
-       "query": "How does hybrid retrieval work?",
+       "query": "How does OpenKB compile knowledge wikis without a vector database?",
        "session_id": "demo-session-001",
        "use_cache": true
      }'
@@ -90,9 +120,9 @@ curl -X POST "http://localhost:8000/api/query" \
 production-ai-template/
 ├── .github/workflows/ci.yml       # DevSecOps: Lint, Type Check, Scan, Test, Migrate, Eval
 ├── app/                      
-│   ├── components/                # Layer 2: Hybrid Retrieval & Reranking Engine
+│   ├── components/                # Layer 2: Vectorless OpenKB Knowledge Engine
 │   │   ├── openkb_client.py       # OpenKB Sidecar REST Client & Breaker Integration
-│   │   ├── hybrid_retriever.py    # Dual BM25 + Dense Vector Search Retriever
+│   │   ├── hybrid_retriever.py    # OpenKB PageIndex Tree + BM25 Retriever
 │   │   └── reranker.py            # Batched LLM Document Relevance Reranker
 │   ├── services/                  # Layer 3 & 4: Core Orchestration, Memory & State
 │   │   ├── rag_pipeline.py        # Pipeline Orchestrator with Circuit Breaker Guards
@@ -137,29 +167,29 @@ production-ai-template/
 This template implements the six-component agent harness taxonomy $\mathcal{H} = (E, T, C, S, L, V)$:
 
 ### 1. E — Execution Loop
-* **File:** [app/agents/executor.py](file:///d:/Projects/ai_template/app/agents/executor.py)
+* **File:** [app/agents/executor.py](app/agents/executor.py)
 * **Design:** ReAct-style iterative tool-calling loop. The LLM evaluates active tool schemas each turn and decides whether to invoke a tool or generate a final answer. The last allowed turn forces `tool_choice="none"` to guarantee loop termination.
 * **Resilience:** LLM calls and tool executions are wrapped in isolated `AsyncCircuitBreaker` instances, ensuring tool degradation does not block reasoning.
 
 ### 2. T — Tool Registry
-* **File:** [app/agents/tools/registry.py](file:///d:/Projects/ai_template/app/agents/tools/registry.py)
+* **File:** [app/agents/tools/registry.py](app/agents/tools/registry.py)
 * **Design:** Centralized tool registrar that generates JSON parameter schemas via Python signature introspection. Registers `expand_context` for on-demand reversible context expansion.
 * **Security Gating:** Enforces server-side permission levels (`high` vs `low`) mapped from decrypted JWT or API Key tokens.
 
 ### 3. C — Context Manager & Compression
-* **File:** [app/services/context_manager.py](file:///d:/Projects/ai_template/app/services/context_manager.py) & [app/services/headroom_adapter.py](file:///d:/Projects/ai_template/app/services/headroom_adapter.py)
+* **File:** [app/services/context_manager.py](app/services/context_manager.py) & [app/services/headroom_adapter.py](app/services/headroom_adapter.py)
 * **Design:** Manages context windows by counting tokens via `tiktoken` and reversibly crushing payload ASTs using Headroom `SmartCrusher`.
 
 ### 4. S — State Store
-* **File:** [app/services/state_store.py](file:///d:/Projects/ai_template/app/services/state_store.py)
+* **File:** [app/services/state_store.py](app/services/state_store.py)
 * **Design:** Asynchronous SQLAlchemy state store with dialect support for PostgreSQL (`postgresql+asyncpg`) and SQLite (`sqlite+aiosqlite`). Schema changes are versioned using Alembic.
 
 ### 5. L — Lifecycle Hooks
-* **File:** [app/services/hooks.py](file:///d:/Projects/ai_template/app/services/hooks.py)
+* **File:** [app/services/hooks.py](app/services/hooks.py)
 * **Design:** Pub/sub event emitter notifying subscribers asynchronously on key events: `on_agent_start`, `on_tool_execute`, `on_llm_call`, and `on_error`.
 
 ### 6. V — Valuation Interface
-* **File:** [evaluation/offline_eval.py](file:///d:/Projects/ai_template/evaluation/offline_eval.py)
+* **File:** [evaluation/offline_eval.py](evaluation/offline_eval.py)
 * **Design:** Active and historical post-hoc quality evaluation engine measuring concept recall against golden dataset test cases. Automatically logs execution trajectories to `evaluation/eval_results/trajectory_runs.jsonl`.
 
 ---
@@ -167,7 +197,7 @@ This template implements the six-component agent harness taxonomy $\mathcal{H} =
 ## 🛡️ Production Security & Resilience
 
 ### 🔐 Multi-Tenant Session Isolation
-All session IDs are automatically prefixed server-side with the caller's authenticated `tenant_id` (`tenant_id:session_id` in [app/main.py](file:///d:/Projects/ai_template/app/main.py)). Tenants cannot collide on session names or read/modify state outside their isolated context.
+All session IDs are automatically prefixed server-side with the caller's authenticated `tenant_id` (`tenant_id:session_id` in [app/main.py](app/main.py)). Tenants cannot collide on session names or read/modify state outside their isolated context.
 
 ### ⚡ Async Circuit Breakers
 State transitions are lock-guarded to allow a single HALF-OPEN probe request during recovery. 
@@ -175,9 +205,9 @@ State transitions are lock-guarded to allow a single HALF-OPEN probe request dur
 - **Tool Breakers:** Catch tool exceptions, surface errors as observations to the LLM turn, and allow the agent to adapt its solution path.
 
 ### 📊 Observability & Cost Tracking
-- **OpenTelemetry Context Spans:** Automatically propagates `tenant.id` and `user.id` across async task boundaries ([observability/tracer.py](file:///d:/Projects/ai_template/observability/tracer.py)).
+- **OpenTelemetry Context Spans:** Automatically propagates `tenant.id` and `user.id` across async task boundaries ([observability/tracer.py](observability/tracer.py)).
 - **LangSmith Tracing:** Full LLM trace visualization enabled via `LANGSMITH_TRACING_ENABLED=true`.
-- **Prometheus Rules:** Latency (P95 > 3s) and error rate SLO alerts configured in [observability/prometheus_rules.yml](file:///d:/Projects/ai_template/observability/prometheus_rules.yml).
+- **Prometheus Rules:** Latency (P95 > 3s) and error rate SLO alerts configured in [observability/prometheus_rules.yml](observability/prometheus_rules.yml).
 
 ---
 
@@ -207,4 +237,4 @@ PYTHONPATH=. python evaluation/offline_eval.py --historical
 ---
 
 ## 📜 License
-Distributed under the MIT License. See `LICENSE` for details.
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.

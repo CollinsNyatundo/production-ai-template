@@ -62,7 +62,7 @@ Provide software teams with a zero-config, production-tested AI backend foundati
 ### Customer Gains
 - **Instant Production-Readiness**: Out-of-the-box support for JWT auth, database migrations, and OpenTelemetry spans.
 - **Zero Silent Failures**: Asynchronous circuit breakers gracefully fallback when upstream APIs (OpenKB, web search, LLM endpoints) experience outages.
-- **Continuous Quality Assurance**: Built-in evaluation pipeline ([offline_eval.py](file:///d:/Projects/ai_template/evaluation/offline_eval.py)) prevents prompt drift during updates.
+- **Continuous Quality Assurance**: Built-in evaluation pipeline ([offline_eval.py](../evaluation/offline_eval.py)) prevents prompt drift during updates.
 
 ### Pains Avoided
 - **No Data Leakage**: Session IDs are automatically isolated server-side by tenant (`tenant_id:session_id`).
