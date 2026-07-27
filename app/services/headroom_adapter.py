@@ -8,9 +8,9 @@ truncation if AST parsing encounters malformed text.
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 
-from app.types import HeadroomCompressedPayload
+from app.types import HeadroomCompressedPayload, JSONDict, JSONValue
 
 logger = logging.getLogger("app.services.headroom_adapter")
 
@@ -26,8 +26,8 @@ except ImportError:
 class HeadroomAdapter:
     def __init__(self, min_tokens_to_crush: int = 150) -> None:
         self.min_tokens_to_crush = min_tokens_to_crush
-        self._crusher: Optional[Any] = None
-        self._pipeline: Optional[Any] = None
+        self._crusher: Optional[object] = None
+        self._pipeline: Optional[object] = None
 
         if HEADROOM_AVAILABLE:
             try:
@@ -61,9 +61,9 @@ class HeadroomAdapter:
             # Check if content is JSON structured
             if content.strip().startswith("{") or content.strip().startswith("["):
                 try:
-                    json_obj: Dict[str, Any] = json.loads(content)
-                    if self._crusher is not None:
-                        crushed: Any = self._crusher.crush(json_obj, query=query or "")
+                    json_obj: JSONDict = json.loads(content)
+                    if self._crusher is not None and hasattr(self._crusher, "crush"):
+                        crushed: JSONValue = self._crusher.crush(json_obj, query=query or "")
                         compressed_text = json.dumps(crushed)
                     else:
                         compressed_text = self._heuristic_json_crush(json_obj)
@@ -88,9 +88,9 @@ class HeadroomAdapter:
             "is_reversible": True,
         }
 
-    def _heuristic_json_crush(self, data: Dict[str, Any]) -> str:
+    def _heuristic_json_crush(self, data: JSONDict) -> str:
         """Strips null values and empty strings to reduce token footprint without losing keys."""
-        cleaned: Dict[str, Any] = {k: v for k, v in data.items() if v is not None and v != "" and v != [] and v != {}}
+        cleaned: JSONDict = {k: v for k, v in data.items() if v is not None and v != "" and v != [] and v != {}}
         return json.dumps(cleaned)
 
     def _heuristic_text_compress(self, text: str) -> str:

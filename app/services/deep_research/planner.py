@@ -1,13 +1,12 @@
-from typing import Any, Dict
-
 from app.services.deep_research.global_context import GlobalResearchContext
 from app.services.llm_client import llm_client
+from app.types import JSONDict
 
 
 class ResearchPlanner:
     """Hierarchical Task Graph Planner for Deep Research."""
 
-    async def create_plan(self, grc: GlobalResearchContext) -> Dict[str, Any]:
+    async def create_plan(self, grc: GlobalResearchContext) -> JSONDict:
         """Formulates a 4-phase research graph and initial knowledge gaps."""
         prompt = (
             f"You are a Senior Principal Research Architect.\n"

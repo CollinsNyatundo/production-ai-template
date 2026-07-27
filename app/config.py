@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     nvidia_base_url: str = Field(default="https://integrate.api.nvidia.com/v1", validation_alias="NVIDIA_BASE_URL")
     nvidia_model: str = Field(default="meta/llama-3.1-70b-instruct", validation_alias="NVIDIA_MODEL")
     nvidia_embedding_model: str = Field(default="nvidia/nv-embedqa-e5-v5", validation_alias="NVIDIA_EMBEDDING_MODEL")
-    llm_request_timeout_s: float = Field(default=60.0, validation_alias="LLM_REQUEST_TIMEOUT_S")
+    llm_request_timeout_s: float = Field(default=120.0, validation_alias="LLM_REQUEST_TIMEOUT_S")
 
     openkb_base_url: str = Field(default="http://127.0.0.1:7566", validation_alias="OPENKB_BASE_URL")
     openkb_timeout_s: float = Field(default=60.0, validation_alias="OPENKB_TIMEOUT_S")

@@ -49,7 +49,7 @@ jobs:
     - name: Execute Quality Evaluation Pipeline
       env:
         NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-        LLM_REQUEST_TIMEOUT_S: "60"
+        LLM_REQUEST_TIMEOUT_S: "120"
         SKIP_OPENKB: "true"
       run: |
         PYTHONPATH=. python evaluation/offline_eval.py

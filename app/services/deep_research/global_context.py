@@ -1,6 +1,8 @@
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List
+from typing import List
+
+from app.types import JSONDict
 
 
 @dataclass
@@ -20,12 +22,12 @@ class GlobalResearchContext:
     """Centralized state store for the Deep Research pipeline (prevents siloed knowledge)."""
 
     original_query: str
-    topic_tree: List[Dict[str, Any]] = field(default_factory=list)
+    topic_tree: List[JSONDict] = field(default_factory=list)
     facts: List[Fact] = field(default_factory=list)
     knowledge_gaps: List[str] = field(default_factory=list)
     kci_score: float = 0.0  # Knowledge Completeness Index (0.0 to 1.0)
-    trajectory: List[Dict[str, Any]] = field(default_factory=list)
-    adversarial_findings: List[Dict[str, Any]] = field(default_factory=list)
+    trajectory: List[JSONDict] = field(default_factory=list)
+    adversarial_findings: List[JSONDict] = field(default_factory=list)
 
     def add_facts(self, new_facts: List[Fact]) -> int:
         """Adds new facts while filtering out exact or high semantic duplicates."""
@@ -57,7 +59,7 @@ class GlobalResearchContext:
             f"Current Knowledge Gaps:\n{gaps_summary or 'None identified yet.'}"
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> JSONDict:
         """Serializes the research context to a dict."""
         return {
             "original_query": self.original_query,
