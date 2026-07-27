@@ -17,7 +17,7 @@
 
 Imagine asking a question in a clean, simple search interface and getting instant, accurate answers from your organization's entire collection of documents—without having to manage complex database clusters or search through hundreds of files.
 
-Behind the simple interface, **Production AI Template** deploys intelligent AI helper agents that work inside a massive digital library of documents. These helpers automatically read, organize, and compile raw documentation into a persistent, interlinked knowledge wiki, instantly retrieving exact answers for users while abstracting away all backend complexity.
+Behind the simple interface, the system deploys intelligent AI helper agents that work inside a massive digital library of documents. These helpers automatically read, organize, and compile raw documentation into a persistent, interlinked knowledge wiki, instantly retrieving exact answers for users while abstracting away all backend complexity.
 
 ---
 
