@@ -17,7 +17,7 @@ class MemoryItem:
     category: str = "preference"  # preference, technical, business, domain
     confidence: float = 0.9
     memory_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    created_at: str = field(default_factory=lambda: datetime.datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
 
 
 class Mem0Client:

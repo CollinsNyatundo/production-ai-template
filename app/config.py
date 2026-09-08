@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///app.db", validation_alias="DATABASE_URL")
 
     jwt_secret: str = Field(default=_INSECURE_DEFAULT_JWT_SECRET, validation_alias="JWT_SECRET")
-    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHP")
+    jwt_algorithm: Literal["HS256", "HS384", "HS512"] = Field(default="HS256", validation_alias="JWT_ALGORITHM")
 
     cors_allowed_origins_raw: str = Field(
         default="http://localhost:8501,http://localhost:3000",

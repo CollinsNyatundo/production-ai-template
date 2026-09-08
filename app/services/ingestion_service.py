@@ -36,16 +36,18 @@ def create_ingestion_job(source_type: str, uri: str, tenant_id: str, collection_
     return job_id
 
 
-def get_job_status(job_id: str) -> Optional[JSONDict]:
-    return INGESTION_JOBS.get(job_id)
+def get_job_status(job_id: str, tenant_id: str) -> Optional[JSONDict]:
+    job = INGESTION_JOBS.get(job_id)
+    return job if job and job.get("tenant_id") == tenant_id else None
 
 
 def list_collections(tenant_id: str) -> List[JSONDict]:
-    return [col for col in ACTIVE_COLLECTIONS.values() if col.get("tenant_id") == tenant_id or tenant_id == "all"]
+    return [col for col in ACTIVE_COLLECTIONS.values() if col.get("tenant_id") == tenant_id]
 
 
-def delete_collection(collection_id: str) -> bool:
-    if collection_id in ACTIVE_COLLECTIONS:
+def delete_collection(collection_id: str, tenant_id: str) -> bool:
+    collection = ACTIVE_COLLECTIONS.get(collection_id)
+    if collection and collection.get("tenant_id") == tenant_id:
         del ACTIVE_COLLECTIONS[collection_id]
         return True
     return False

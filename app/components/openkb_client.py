@@ -26,7 +26,7 @@ class OpenKBClient:
     async def _post_json(self, endpoint: str, payload: JSONDict) -> JSONDict:
         async def _request() -> JSONDict:
             try:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
                     url = f"{self.base_url}{endpoint}"
                     response = await client.post(url, json=payload)
                     response.raise_for_status()
@@ -77,7 +77,7 @@ class OpenKBClient:
         if session_id:
             payload["session_id"] = session_id
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
             async with client.stream("POST", url, json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():

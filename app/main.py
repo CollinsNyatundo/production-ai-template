@@ -97,6 +97,8 @@ async def query_endpoint(
 
     try:
         payload.actor_permission = current_user.permission_level
+        payload.tenant_id = current_user.tenant_id
+        payload.user_id = current_user.username
         client_session_id = payload.session_id
         payload.session_id = _scoped_session_id(current_user, payload.session_id)
 
@@ -150,6 +152,7 @@ async def delete_memory_endpoint(
     return {"status": "success", "deleted_memory_id": memory_id}
 
 
+@app.post("/api/query/stream")
 @limiter.limit(f"{settings.rate_limit_calls}/{settings.rate_limit_period} seconds")
 async def query_stream_endpoint(
     payload: QueryRequest,
