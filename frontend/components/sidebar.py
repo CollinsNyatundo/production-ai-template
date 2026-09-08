@@ -1,4 +1,3 @@
-import os
 import time
 
 import httpx
@@ -14,6 +13,9 @@ from components.modals import (
 
 
 def render_sidebar(backend_api_url: str, default_api_key: str):
+    if "api_key_input" not in st.session_state:
+        st.session_state.api_key_input = default_api_key
+
     with st.sidebar:
         st.markdown("### ✳️ Nexus AI")
 
@@ -52,7 +54,8 @@ def render_sidebar(backend_api_url: str, default_api_key: str):
             st.markdown("**🧠 Persistent Memory (Mem0)**")
             if st.button("Inspect Active Memories", use_container_width=True, key="btn_inspect_mem0"):
                 try:
-                    headers = {"X-API-Key": os.getenv("FRONTEND_API_KEY", "")}
+                    api_key = st.session_state.get("api_key_input", "")
+                    headers = {"X-API-Key": api_key} if api_key else {}
                     with httpx.Client() as client:
                         resp = client.get(
                             f"{backend_api_url}/api/memory",
@@ -72,7 +75,8 @@ def render_sidebar(backend_api_url: str, default_api_key: str):
             st.markdown("---")
             if st.button("Clear Session History", use_container_width=True):
                 try:
-                    headers = {"X-API-Key": os.getenv("FRONTEND_API_KEY", "")}
+                    api_key = st.session_state.get("api_key_input", "")
+                    headers = {"X-API-Key": api_key} if api_key else {}
                     with httpx.Client() as client:
                         resp = client.delete(
                             f"{backend_api_url}/api/session/{st.session_state.session_id}",
@@ -91,9 +95,9 @@ def render_sidebar(backend_api_url: str, default_api_key: str):
             st.text_input("Backend URL", value=backend_api_url, disabled=True)
             api_key_input = st.text_input(
                 "API Key",
-                value=default_api_key,
                 type="password",
                 help="Sent as X-API-Key with every backend request.",
+                key="api_key_input",
             )
 
         st.markdown("---")
