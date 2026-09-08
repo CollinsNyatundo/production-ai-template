@@ -2,54 +2,34 @@ name: Continuous Integration
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-test:
+  test:
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      APP_ENV: test
+      JWT_SECRET: test-suite-secret-not-for-production
+      NVIDIA_API_KEY: ""
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        cache: 'pip'
-
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install . pytest pytest-cov pytest-asyncio ruff mypy bandit
-
-    - name: Code Style & Quality Checks (Ruff)
-      run: |
-        ruff check .
-        ruff format --check .
-
-    - name: Static Type Validation (Mypy)
-      run: |
-        mypy app evaluation observability scripts tests
-
-    - name: Security Vulnerability Scanning (Bandit)
-      run: |
-        bandit -r app -ll -ii
-
-    - name: Run Test Suite (Pytest)
-      run: |
-        pytest --cov=app --cov-report=term-missing
-
-    - name: Apply Database Migrations
-      run: |
-        PYTHONPATH=. python scripts/migrate.py upgrade
-
-    - name: Execute Quality Evaluation Pipeline
-      env:
-        NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-        LLM_REQUEST_TIMEOUT_S: "120"
-        SKIP_OPENKB: "true"
-      run: |
-        PYTHONPATH=. python evaluation/offline_eval.py
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy app evaluation observability scripts tests
+      - run: bandit -r app -ll -ii
+      - run: pytest --cov=app --cov-report=term-missing --cov-fail-under=75
+      - run: PYTHONPATH=. python scripts/migrate.py upgrade

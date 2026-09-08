@@ -18,11 +18,11 @@ class SemanticCache:
         # NOT shared across replicas if this app is ever horizontally scaled.
         # REDIS_URL is configured but genuinely unused until that's built.
         logger.info("Initializing in-process exact-match query cache (local memory, not Redis-backed yet)...")
-        self.local_cache = {}
+        self.local_cache: dict[tuple[str, str], tuple[str, list[SearchDocument]]] = {}
 
-    async def get(self, query: str) -> Optional[QueryResponse]:
+    async def get(self, tenant_id: str, query: str) -> Optional[QueryResponse]:
         # Clean query for key lookup
-        key = query.strip().lower()
+        key = (tenant_id, query.strip().lower())
 
         # Exact-match lookup - see the honest-label note in __init__.
         if key in self.local_cache:
@@ -33,8 +33,8 @@ class SemanticCache:
         logger.info(f"Semantic cache MISS for query: '{query}'")
         return None
 
-    async def set(self, query: str, answer: str, sources: list[SearchDocument]) -> None:
-        key = query.strip().lower()
+    async def set(self, tenant_id: str, query: str, answer: str, sources: list[SearchDocument]) -> None:
+        key = (tenant_id, query.strip().lower())
         # Set value
         self.local_cache[key] = (answer, sources)
         logger.info(f"Cached answer for query: '{query}'")

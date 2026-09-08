@@ -16,6 +16,8 @@ from app.components.openkb_client import openkb_client
 from app.config import settings
 from app.models import QueryRequest, QueryResponse
 from app.security.auth import User, get_current_user
+from app.security.input_guard import input_guard
+from app.security.output_filter import output_filter
 from app.services.conversation import conversation_service
 from app.services.hooks import lifecycle_hooks
 from app.services.rag_pipeline import rag_pipeline
@@ -97,6 +99,8 @@ async def query_endpoint(
 
     try:
         payload.actor_permission = current_user.permission_level
+        payload.tenant_id = current_user.tenant_id
+        payload.user_id = current_user.username
         client_session_id = payload.session_id
         payload.session_id = _scoped_session_id(current_user, payload.session_id)
 
@@ -150,22 +154,38 @@ async def delete_memory_endpoint(
     return {"status": "success", "deleted_memory_id": memory_id}
 
 
+@app.post("/api/query/stream")
 @limiter.limit(f"{settings.rate_limit_calls}/{settings.rate_limit_period} seconds")
 async def query_stream_endpoint(
     payload: QueryRequest,
     request: Request,
     current_user: User = Depends(get_current_user),
 ):
+    is_safe, reason = await input_guard.validate(payload.query)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=f"Request rejected for security reasons: {reason}.")
+
     scoped_id = _scoped_session_id(current_user, payload.session_id)
 
     async def sse_generator():
         try:
+            chunks = []
             async for chunk in openkb_client.query_stream(payload.query, session_id=scoped_id):
-                await lifecycle_hooks.emit("on_llm_new_token", token=chunk)
-                yield f"data: {chunk}\n\n"
-            yield "data: [DONE]\n\n"
-        except Exception as e:
-            logger.error(f"Error streaming from OpenKB: {e}")
-            yield f'data: {{"error": "{str(e)}"}}\n\n'
+                chunks.append(chunk)
 
-    return StreamingResponse(sse_generator(), media_type="text/event-stream")
+            sanitized = await output_filter.sanitize("".join(chunks))
+            if sanitized:
+                await lifecycle_hooks.emit("on_llm_new_token", token=sanitized)
+                event_data = sanitized.replace("\r", "").replace("\n", "\ndata: ")
+                yield f"data: {event_data}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception:
+            error_id = uuid.uuid4().hex[:12]
+            logger.exception(f"Error streaming from OpenKB (error_id={error_id})")
+            yield f'data: {{"error": "Streaming failed", "reference": "{error_id}"}}\n\n'
+
+    return StreamingResponse(
+        sse_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
+    )

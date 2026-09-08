@@ -7,9 +7,10 @@ from skills import ALL_SKILLS
 def open_ingestion_modal(backend_api_url: str = "http://localhost:8000"):
     st.caption("Connect live data sources to automatically chunk, embed, and index into your vector knowledge base.")
 
-    tab_web, tab_github, tab_file, tab_sql = st.tabs(["🌐 Web URL", "💻 GitHub Repo", "📁 File Upload", "🗄️ SQL Query"])
+    tab_web, tab_file = st.tabs(["🌐 Web URL", "📁 File Upload"])
 
-    headers = {"X-API-Key": st.session_state.get("api_key_input", "")}
+    api_key = st.session_state.get("api_key_input", "")
+    headers = {"X-API-Key": api_key} if api_key else {}
 
     # Tab 1: Web URL Scraper
     with tab_web:
@@ -25,7 +26,6 @@ def open_ingestion_modal(backend_api_url: str = "http://localhost:8000"):
                         json={
                             "source_type": "web",
                             "uri": web_url,
-                            "tenant_id": st.session_state.tenant_id,
                             "collection_name": col_name,
                         },
                         timeout=5.0,
@@ -40,38 +40,11 @@ def open_ingestion_modal(backend_api_url: str = "http://localhost:8000"):
             except Exception as ex:
                 st.error(f"Failed to trigger ingestion: {ex}")
 
-    # Tab 2: GitHub Repository Connector
-    with tab_github:
-        st.markdown("**Clone & Index GitHub Repository**")
-        repo_url = st.text_input("GitHub Repo URL", value="https://github.com/streamlit/streamlit", key="ingest_gh_url")
-        gh_col_name = st.text_input("Collection Name", value="github-streamlit", key="ingest_gh_col_name")
-        if st.button("⚡ Start GitHub Sync", type="primary", use_container_width=True, key="btn_start_gh_ingest"):
-            try:
-                with httpx.Client() as client:
-                    resp = client.post(
-                        f"{backend_api_url}/api/v1/ingest",
-                        headers=headers,
-                        json={
-                            "source_type": "github",
-                            "uri": repo_url,
-                            "tenant_id": st.session_state.tenant_id,
-                            "collection_name": gh_col_name,
-                        },
-                        timeout=5.0,
-                    )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    st.session_state.active_ingest_job_id = data.get("job_id")
-                    st.success(f"GitHub Sync Started: `{data.get('job_id')}`")
-                    st.rerun()
-            except Exception as ex:
-                st.error(f"Failed to connect GitHub: {ex}")
-
-    # Tab 3: File Upload
+    # Tab 2: File Upload
     with tab_file:
-        st.markdown("**Upload Local File (.txt, .md, .py, .json, .csv)**")
+        st.markdown("**Upload Local File (.txt, .md, .json)**")
         uploaded_file = st.file_uploader(
-            "Choose file to ingest", type=["txt", "md", "py", "json", "csv"], key="ingest_file_uploader"
+            "Choose file to ingest", type=["txt", "md", "json"], key="ingest_file_uploader"
         )
         if uploaded_file and st.button(
             "⚡ Upload & Embed File", type="primary", use_container_width=True, key="btn_upload_file_ingest"
@@ -79,8 +52,6 @@ def open_ingestion_modal(backend_api_url: str = "http://localhost:8000"):
             try:
                 files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type or "text/plain")}
                 data_form = {
-                    "source_type": "file",
-                    "tenant_id": st.session_state.tenant_id,
                     "collection_name": f"file-{uploaded_file.name}",
                 }
                 with httpx.Client() as client:
@@ -96,41 +67,10 @@ def open_ingestion_modal(backend_api_url: str = "http://localhost:8000"):
                     st.session_state.active_ingest_job_id = job_data.get("job_id")
                     st.success(f"File upload job queued: `{job_data.get('job_id')}`")
                     st.rerun()
+                else:
+                    st.error(f"Error {resp.status_code}: {resp.text}")
             except Exception as ex:
                 st.error(f"Failed to upload file: {ex}")
-
-    # Tab 4: SQL Database Query Extractor
-    with tab_sql:
-        st.markdown("**Extract & Embed SQL Query Result**")
-        sql_conn = st.text_input(
-            "Connection URI", value="postgresql://user:pass@localhost:5432/db", key="ingest_sql_conn"
-        )
-        sql_query = st.text_area(
-            "SQL Query", value="SELECT * FROM products LIMIT 100", height=60, key="ingest_sql_query"
-        )
-        if st.button(
-            "⚡ Extract & Embed SQL Data", type="primary", use_container_width=True, key="btn_start_sql_ingest"
-        ):
-            try:
-                with httpx.Client() as client:
-                    resp = client.post(
-                        f"{backend_api_url}/api/v1/ingest",
-                        headers=headers,
-                        json={
-                            "source_type": "sql",
-                            "uri": f"{sql_conn}#{sql_query}",
-                            "tenant_id": st.session_state.tenant_id,
-                            "collection_name": "sql-product-catalog",
-                        },
-                        timeout=5.0,
-                    )
-                if resp.status_code == 200:
-                    job_data = resp.json()
-                    st.session_state.active_ingest_job_id = job_data.get("job_id")
-                    st.success(f"SQL Job started: `{job_data.get('job_id')}`")
-                    st.rerun()
-            except Exception as ex:
-                st.error(f"Failed SQL extraction: {ex}")
 
     st.write("---")
 
@@ -164,7 +104,7 @@ def open_ingestion_modal(backend_api_url: str = "http://localhost:8000"):
     try:
         with httpx.Client() as client:
             col_resp = client.get(
-                f"{backend_api_url}/api/v1/collections?tenant_id={st.session_state.tenant_id}",
+                f"{backend_api_url}/api/v1/collections",
                 headers=headers,
                 timeout=5.0,
             )
