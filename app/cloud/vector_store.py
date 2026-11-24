@@ -168,10 +168,59 @@ class S3VectorKnowledgeStore:
         s3 = self._factory.get_client("s3")
         for start in range(0, len(keys), _S3_DELETE_MAX_BATCH):
             batch = keys[start : start + _S3_DELETE_MAX_BATCH]
-            s3.delete_objects(
+            resp = s3.delete_objects(
                 Bucket=self.bucket_name,
                 Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
             )
+            errors = resp.get("Errors", []) if isinstance(resp, dict) else []
+            if errors:
+                details = ", ".join(
+                    f"{err.get('Key', '?')}: {err.get('Code', 'Unknown')}" for err in errors if isinstance(err, dict)
+                )
+                raise RuntimeError(
+                    f"S3 delete_objects reported {len(errors)} failure(s) in bucket '{self.bucket_name}': {details}"
+                )
+
+    async def stage_ingestion_text(self, tenant_id: str, job_id: str, text: str) -> str:
+        """Persist uploaded ingestion text to S3 staging (KMS-encrypted when configured)."""
+        key = f"tenants/{tenant_id}/staging/{job_id}.txt"
+        encrypted = False
+        if self._kms_cipher and self._kms_cipher.key_id:
+            payload = await self._kms_cipher.encrypt_text(tenant_id, text)
+            body = payload.encode("utf-8")
+            encrypted = True
+        else:
+            body = text.encode("utf-8")
+
+        await asyncio.to_thread(
+            self._put_s3_object_sync,
+            key,
+            body,
+            {
+                "tenant_id": tenant_id,
+                "job_id": job_id,
+                "kms_encrypted": "true" if encrypted else "false",
+            },
+        )
+        return key
+
+    async def load_staged_text(self, tenant_id: str, s3_key: str) -> str:
+        """Load and decrypt staged ingestion text for the given tenant."""
+        expected_prefix = f"tenants/{tenant_id}/staging/"
+        if not s3_key.startswith(expected_prefix):
+            raise PermissionError(f"Staging key '{s3_key}' does not belong to tenant '{tenant_id}'.")
+        raw = await asyncio.to_thread(self._get_s3_object_sync, s3_key)
+        text = raw.decode("utf-8")
+        if self._kms_cipher and self._kms_cipher.key_id:
+            try:
+                return await self._kms_cipher.decrypt_text(tenant_id, text)
+            except (PermissionError, ValueError):
+                raise
+        return text
+
+    async def delete_staged_text(self, s3_key: str) -> None:
+        """Remove a consumed S3 staging object after successful job processing."""
+        await asyncio.to_thread(self._delete_s3_keys_sync, [s3_key])
 
     def _delete_vectors_sync(self, index_name: str, vector_keys: List[str]) -> None:
         if not vector_keys:

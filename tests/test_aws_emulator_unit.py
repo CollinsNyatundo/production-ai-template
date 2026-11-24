@@ -122,24 +122,181 @@ async def test_secrets_provider_caches_parses_and_rejects_default_jwt(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_semantic_cache_generation_blocks_stale_writes_and_auth_keeps_401() -> None:
+async def test_semantic_cache_generation_blocks_stale_writes_and_auth_keeps_401(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from fastapi import HTTPException
 
+    from app.models import QueryRequest
     from app.security.auth import create_access_token, get_current_user
-    from app.services.semantic_cache import SemanticCache
+    from app.services.rag_pipeline import RAGPipeline
+    from app.services.semantic_cache import semantic_cache
 
-    cache = SemanticCache()
-    gen_before = cache.get_tenant_generation("tenant-a")
-    await cache.invalidate_tenant("tenant-a")
-    # Stale in-flight write captured before invalidation must be skipped
-    await cache.set("tenant-a", "handbook policy", "stale answer", [], expected_generation=gen_before)
-    assert await cache.get("tenant-a", "handbook policy") is None
+    # End-to-end RAGPipeline.execute check: invalidation during an in-flight query
+    # must prevent stale answers/sources from repopulating semantic_cache.
+    tenant = "tenant-race-check"
+    query = "What is the retention policy?"
+    await semantic_cache.invalidate_tenant(tenant)
 
-    # Signed token with unknown subject must return 401 (never 503)
+    async def _rewriter_with_concurrent_delete(q: str, history: str) -> str:
+        await semantic_cache.invalidate_tenant(tenant)
+        return q
+
+    async def _direct_route(_q: str) -> str:
+        return "direct_response"
+
+    async def _direct_answer(_q: str) -> tuple[str, list[dict[str, object]], dict[str, int]]:
+        return (
+            "Stale handbook answer",
+            [{"turn": 1, "thought": "direct", "tool": None, "arguments": {}, "observation": ""}],
+            {"prompt_tokens": 5, "completion_tokens": 5},
+        )
+
+    async def _noop_async(*_args: object, **_kwargs: object) -> object:
+        return []
+
+    async def _safe_input(_q: str) -> tuple[bool, str]:
+        return True, ""
+
+    async def _identity_output(text: str) -> str:
+        return text
+
+    async def _zero_cost(**_kwargs: object) -> dict[str, float]:
+        return {"total_cost": 0.0}
+
+    monkeypatch.setattr("app.services.rag_pipeline.input_guard.validate", _safe_input)
+    monkeypatch.setattr("app.services.rag_pipeline.conversation_service.get_history", _noop_async)
+    monkeypatch.setattr("app.services.rag_pipeline.conversation_service.add_message", _noop_async)
+    monkeypatch.setattr("app.services.rag_pipeline.query_rewriter.rewrite", _rewriter_with_concurrent_delete)
+    monkeypatch.setattr("app.services.rag_pipeline.adaptive_router.route_adaptively", _direct_route)
+    monkeypatch.setattr(RAGPipeline, "_direct_response", lambda _self, q: _direct_answer(q))
+    monkeypatch.setattr("app.services.rag_pipeline.cost_tracker.track_usage", _zero_cost)
+    monkeypatch.setattr("app.services.rag_pipeline.output_filter.sanitize", _identity_output)
+    monkeypatch.setattr("app.services.rag_pipeline.memory_manager.trigger_async_extraction", lambda **_kw: None)
+    monkeypatch.setattr("app.services.rag_pipeline.trajectory_logger.log_run", _noop_async)
+
+    pipeline = RAGPipeline()
+    await pipeline.execute(
+        QueryRequest(query=query, session_id="sess-race", tenant_id=tenant, user_id="admin", use_cache=True)
+    )
+    assert await semantic_cache.get(tenant, query) is None
+
+    # Explicitly run in local-secret mode so signature verification succeeds and
+    # the unknown-user 401 path (not signature mismatch) is exercised.
+    monkeypatch.setattr(settings, "aws_backend_enabled", False)
     unknown_token = create_access_token({"sub": "nonexistent-user"})
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(token=unknown_token, api_key=None)
     assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "User profile not found."
+
+
+@pytest.mark.asyncio
+async def test_s3_delete_objects_partial_errors_preserve_collection_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.ingestion_service import ACTIVE_COLLECTIONS, delete_collection_async
+
+    s3 = MagicMock()
+    s3.list_objects_v2.return_value = {
+        "Contents": [{"Key": "tenants/tenant-a/collections/col-err/chunk-0000.txt"}],
+        "IsTruncated": False,
+    }
+    # Simulate AWS S3 HTTP 200 response with per-object Errors under Quiet=True
+    s3.delete_objects.return_value = {
+        "Errors": [
+            {
+                "Key": "tenants/tenant-a/collections/col-err/chunk-0000.txt",
+                "Code": "AccessDenied",
+                "Message": "Access Denied",
+            }
+        ]
+    }
+    s3v = MagicMock()
+    factory = MagicMock(spec=AWSClientFactory)
+    factory.get_client.side_effect = lambda name: s3 if name == "s3" else s3v
+
+    store = S3VectorKnowledgeStore(factory=factory, bucket_name="docs", vector_bucket_name="vecs")
+    with pytest.raises(RuntimeError, match="AccessDenied"):
+        await store.delete_collection_chunks("tenant-a", "col-err")
+
+    # Verify delete_collection_async propagates the error and keeps ACTIVE_COLLECTIONS intact
+    monkeypatch.setattr(settings, "aws_backend_enabled", True)
+    monkeypatch.setattr("app.services.ingestion_service.S3VectorKnowledgeStore", lambda **_kw: store)
+    ACTIVE_COLLECTIONS["col-err"] = {"id": "col-err", "tenant_id": "tenant-a", "chunk_count": 1}
+    try:
+        with pytest.raises(RuntimeError, match="AccessDenied"):
+            await delete_collection_async("col-err", "tenant-a")
+        assert "col-err" in ACTIVE_COLLECTIONS
+    finally:
+        ACTIVE_COLLECTIONS.pop("col-err", None)
+
+
+@pytest.mark.asyncio
+async def test_sqs_ingestion_worker_acknowledges_success_and_leaves_failures_for_dlq(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.cloud.queue_store import QueuedMessage
+    from app.services.ingestion_service import INGESTION_JOBS
+    from app.services.ingestion_worker import SQSIngestionWorker
+
+    s3 = MagicMock()
+    s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"Staged paragraph content exceeding twenty chars.")}
+    s3.delete_objects.return_value = {}
+    s3v = MagicMock()
+    sqs = MagicMock()
+    factory = MagicMock(spec=AWSClientFactory)
+    factory.get_client.side_effect = lambda name: {"s3": s3, "s3vectors": s3v, "sqs": sqs}[name]
+
+    queue = SQSIngestionQueue(factory=factory, queue_url="https://127.0.0.1:9297/000000000000/ingest")
+    store = S3VectorKnowledgeStore(factory=factory, bucket_name="docs", vector_bucket_name="vecs", kms_cipher=None)
+    worker = SQSIngestionWorker(queue=queue, vector_store=store)
+
+    async def _complete_job(job_id: str, content_override: str | None = None) -> None:
+        assert content_override == "Staged paragraph content exceeding twenty chars."
+        INGESTION_JOBS[job_id]["status"] = "completed"
+
+    monkeypatch.setattr("app.services.ingestion_worker.process_ingestion_job", _complete_job)
+    ok_msg = QueuedMessage(
+        message_id="m-ok",
+        receipt_handle="rh-ok",
+        body={
+            "job_id": "job-ok",
+            "tenant_id": "tenant-a",
+            "source_type": "file",
+            "uri": "doc.txt",
+            "collection_name": "doc-kb",
+            "staging_s3_key": "tenants/tenant-a/staging/job-ok.txt",
+        },
+    )
+    assert await worker.process_message(ok_msg) is True
+    sqs.delete_message.assert_called_once_with(
+        QueueUrl="https://127.0.0.1:9297/000000000000/ingest",
+        ReceiptHandle="rh-ok",
+    )
+    s3.delete_objects.assert_called_once()
+
+    # Failed job MUST NOT be acknowledged so SQS VisibilityTimeout/DLQ handles retries
+    sqs.delete_message.reset_mock()
+
+    async def _fail_job(job_id: str, content_override: str | None = None) -> None:
+        INGESTION_JOBS[job_id]["status"] = "failed"
+        INGESTION_JOBS[job_id]["error"] = "simulated indexing error"
+
+    monkeypatch.setattr("app.services.ingestion_worker.process_ingestion_job", _fail_job)
+    fail_msg = QueuedMessage(
+        message_id="m-fail",
+        receipt_handle="rh-fail",
+        body={
+            "job_id": "job-fail",
+            "tenant_id": "tenant-a",
+            "source_type": "file",
+            "uri": "bad.txt",
+            "collection_name": "bad-kb",
+        },
+    )
+    assert await worker.process_message(fail_msg) is False
+    sqs.delete_message.assert_not_called()
 
 
 @pytest.mark.asyncio

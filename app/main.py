@@ -1,8 +1,9 @@
+import asyncio
 import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, Literal, cast
+from typing import Any, Literal, Optional, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,8 +37,25 @@ limiter = Limiter(key_func=get_remote_address)
 async def lifespan(app: FastAPI):
     logger.info("Initializing application services...")
     await state_store.initialize_tables()
-    yield
-    logger.info("Shutting down application services...")
+    worker_stop: Optional[asyncio.Event] = None
+    worker_task: Optional[asyncio.Task[None]] = None
+    if settings.aws_backend_enabled and settings.aws_sqs_queue_url:
+        from app.services.ingestion_worker import sqs_ingestion_worker
+
+        worker_stop = asyncio.Event()
+        worker_task = asyncio.create_task(sqs_ingestion_worker.run_loop(worker_stop))
+    try:
+        yield
+    finally:
+        if worker_stop is not None:
+            worker_stop.set()
+        if worker_task is not None:
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Shutting down application services...")
 
 
 app = FastAPI(

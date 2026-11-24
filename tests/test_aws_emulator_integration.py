@@ -166,15 +166,19 @@ async def test_s3_vectors_and_kms_multi_tenant_rag_isolation(
     )
     assert all(doc.metadata.get("collection_id") != alpha_col_id for doc in alpha_after_delete)
 
-    # Assert directly against raw S3 Vectors index so missing S3 objects cannot mask leftover vectors
+    # Assert directly against raw S3 Vectors index (via asyncio.to_thread) so missing S3 objects
+    # cannot mask leftover vectors and the event loop is never blocked.
     s3v_client = AWSClientFactory().get_client("s3vectors")
-    raw_after_delete = s3v_client.query_vectors(
+    query_vec = deterministic_embed("Nairobi liquidity buffer percentage", 64)
+    raw_resp = await asyncio.to_thread(
+        s3v_client.query_vectors,
         vectorBucketName=emulator_resources["AWS_S3_VECTOR_BUCKET"],
         indexName="tenant-tenant-alpha",
-        queryVector={"float32": deterministic_embed("Nairobi liquidity buffer percentage", 64)},
+        queryVector={"float32": query_vec},
         topK=10,
         returnMetadata=True,
-    ).get("vectors", [])
+    )
+    raw_after_delete = raw_resp.get("vectors", [])
     assert all(
         (vec.get("metadata") or {}).get("collection_id") != alpha_col_id
         for vec in raw_after_delete
@@ -308,6 +312,59 @@ async def test_cloudwatch_and_xray_live_span_emission(
         ]
     )
     assert raw_resp.get("UnprocessedTraceSegments", []) == []
+
+
+@pytest.mark.asyncio
+async def test_sqs_worker_end_to_end_staged_ingestion_and_ack(
+    emulator_resources: Dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SQSIngestionWorker consumes a staged S3/SQS job, indexes into S3 Vectors, and acknowledges it."""
+    from app.services.ingestion_worker import SQSIngestionWorker
+
+    monkeypatch.setattr(settings, "aws_backend_enabled", True)
+    monkeypatch.setattr(settings, "aws_s3_bucket", emulator_resources["AWS_S3_BUCKET"])
+    monkeypatch.setattr(settings, "aws_s3_vector_bucket", emulator_resources["AWS_S3_VECTOR_BUCKET"])
+    monkeypatch.setattr(settings, "aws_kms_key_id", emulator_resources["AWS_KMS_KEY_ID"])
+    monkeypatch.setattr(settings, "aws_sqs_queue_url", emulator_resources["AWS_SQS_QUEUE_URL"])
+
+    factory = AWSClientFactory()
+    cipher = KMSEnvelopeCipher(factory=factory, key_id=emulator_resources["AWS_KMS_KEY_ID"])
+    store = S3VectorKnowledgeStore(
+        factory=factory,
+        bucket_name=emulator_resources["AWS_S3_BUCKET"],
+        vector_bucket_name=emulator_resources["AWS_S3_VECTOR_BUCKET"],
+        kms_cipher=cipher,
+    )
+    queue = SQSIngestionQueue(factory=factory, queue_url=emulator_resources["AWS_SQS_QUEUE_URL"])
+    worker = SQSIngestionWorker(queue=queue, vector_store=store, kms_cipher=cipher)
+
+    job_id = create_ingestion_job("file", "sqs-staged.txt", "tenant-sqs", "sqs-kb")
+    staging_key = await store.stage_ingestion_text(
+        "tenant-sqs",
+        job_id,
+        "SQS Consumer Proof: Kilindini port container dwell times dropped by 18 percent after automation.",
+    )
+    await queue.enqueue_job(
+        {
+            "job_id": job_id,
+            "tenant_id": "tenant-sqs",
+            "source_type": "file",
+            "uri": "sqs-staged.txt",
+            "collection_name": "sqs-kb",
+            "staging_s3_key": staging_key,
+        }
+    )
+
+    processed = await worker.process_once(max_messages=5, wait_seconds=2)
+    assert processed == 1
+    job_status = get_job_status(job_id, "tenant-sqs")
+    assert job_status is not None and job_status["status"] == "completed"
+
+    # Message was acknowledged so queue is empty and chunk is searchable via S3 Vectors
+    assert await queue.receive_jobs(max_messages=1, wait_seconds=1) == []
+    hits = await store.query("tenant-sqs", "Kilindini container dwell times", top_k=2)
+    assert hits and "18 percent" in hits[0].content
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from pydantic import BaseModel
 
 from app.cloud.queue_store import sqs_ingestion_queue
+from app.cloud.secrets import kms_envelope_cipher
+from app.cloud.vector_store import S3VectorKnowledgeStore
 from app.config import settings
 from app.security.auth import User, get_current_user
 from app.services.connectors.file_extractor import extract_file_content
@@ -59,8 +61,13 @@ async def start_ingestion(
                 }
             )
         except Exception as exc:
-            logger.warning("SQS enqueue skipped for job '%s': %s", job_id, exc)
-    bg_tasks.add_task(process_ingestion_job, job_id, None)
+            logger.error("Failed to enqueue SQS ingestion job '%s': %s", job_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Ingestion queue unavailable.",
+            ) from exc
+    else:
+        bg_tasks.add_task(process_ingestion_job, job_id, None)
 
     return {
         "job_id": job_id,
@@ -92,6 +99,8 @@ async def start_file_ingestion(
     job_id = create_ingestion_job("file", uri, current_user.tenant_id, c_name)
     if settings.aws_backend_enabled and settings.aws_sqs_queue_url:
         try:
+            vector_store = S3VectorKnowledgeStore(kms_cipher=kms_envelope_cipher)
+            staging_key = await vector_store.stage_ingestion_text(current_user.tenant_id, job_id, content_override)
             await sqs_ingestion_queue.enqueue_job(
                 {
                     "job_id": job_id,
@@ -99,11 +108,17 @@ async def start_file_ingestion(
                     "source_type": "file",
                     "uri": uri,
                     "collection_name": c_name,
+                    "staging_s3_key": staging_key,
                 }
             )
         except Exception as exc:
-            logger.warning("SQS enqueue skipped for file job '%s': %s", job_id, exc)
-    bg_tasks.add_task(process_ingestion_job, job_id, content_override)
+            logger.error("Failed to stage/enqueue SQS file job '%s': %s", job_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Ingestion queue unavailable.",
+            ) from exc
+    else:
+        bg_tasks.add_task(process_ingestion_job, job_id, content_override)
 
     return {
         "job_id": job_id,

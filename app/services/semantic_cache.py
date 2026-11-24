@@ -22,6 +22,15 @@ class SemanticCache:
         self._tenant_generations: dict[str, int] = {}
 
     def get_tenant_generation(self, tenant_id: str) -> int:
+        """Return the current cache invalidation generation for a tenant.
+
+        Args:
+            tenant_id: Tenant identifier whose cache generation counter is queried.
+
+        Returns:
+            Monotonically increasing integer starting at ``0`` and incremented on
+            every ``invalidate_tenant(tenant_id)`` call.
+        """
         return self._tenant_generations.get(tenant_id, 0)
 
     async def get(self, tenant_id: str, query: str) -> Optional[QueryResponse]:
