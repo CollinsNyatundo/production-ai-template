@@ -69,8 +69,9 @@ class AWSSecretsProvider:
         secret_name = settings.aws_jwt_secret_name.strip()
         if not secret_name:
             raise ValueError("AWS_JWT_SECRET_NAME must be configured when AWS_BACKEND_ENABLED=true.")
-        resolved = (await self.get_secret(secret_name, json_key="JWT_SECRET")).strip()
-        if not resolved or resolved == _INSECURE_DEFAULT_JWT_SECRET:
+        resolved = await self.get_secret(secret_name, json_key="JWT_SECRET")
+        normalized = resolved.strip()
+        if not normalized or normalized == _INSECURE_DEFAULT_JWT_SECRET:
             raise ValueError("Resolved AWS JWT secret is empty or uses the insecure published default.")
         return resolved
 

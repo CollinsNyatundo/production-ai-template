@@ -110,9 +110,36 @@ async def test_secrets_provider_caches_parses_and_rejects_default_jwt(monkeypatc
 
     monkeypatch.setattr(settings, "aws_backend_enabled", True)
     monkeypatch.setattr(settings, "aws_jwt_secret_name", "prod/jwt")
+    # Preserve surrounding whitespace in a valid stored key
+    sm.get_secret_value.return_value = {"SecretString": json.dumps({"JWT_SECRET": "  exact-key-with-spaces  "})}
+    provider.clear_cache()
+    assert await provider.get_jwt_secret() == "  exact-key-with-spaces  "
+
+    provider.clear_cache()
     sm.get_secret_value.return_value = {"SecretString": json.dumps({"JWT_SECRET": _INSECURE_DEFAULT_JWT_SECRET})}
     with pytest.raises(ValueError, match="insecure published default"):
         await provider.get_jwt_secret()
+
+
+@pytest.mark.asyncio
+async def test_semantic_cache_generation_blocks_stale_writes_and_auth_keeps_401() -> None:
+    from fastapi import HTTPException
+
+    from app.security.auth import create_access_token, get_current_user
+    from app.services.semantic_cache import SemanticCache
+
+    cache = SemanticCache()
+    gen_before = cache.get_tenant_generation("tenant-a")
+    await cache.invalidate_tenant("tenant-a")
+    # Stale in-flight write captured before invalidation must be skipped
+    await cache.set("tenant-a", "handbook policy", "stale answer", [], expected_generation=gen_before)
+    assert await cache.get("tenant-a", "handbook policy") is None
+
+    # Signed token with unknown subject must return 401 (never 503)
+    unknown_token = create_access_token({"sub": "nonexistent-user"})
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(token=unknown_token, api_key=None)
+    assert exc_info.value.status_code == 401
 
 
 @pytest.mark.asyncio

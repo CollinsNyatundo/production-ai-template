@@ -135,6 +135,8 @@ async def get_current_user(
 
             logger.info(f"Authenticated user '{user.username}' via JWT Bearer (Tenant: {user.tenant_id})")
             return user
+        except HTTPException:
+            raise
         except jwt.PyJWTError as e:
             logger.warning(f"JWT decode error: {e}")
             raise HTTPException(

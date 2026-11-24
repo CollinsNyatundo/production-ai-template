@@ -19,6 +19,10 @@ class SemanticCache:
         # REDIS_URL is configured but genuinely unused until that's built.
         logger.info("Initializing in-process exact-match query cache (local memory, not Redis-backed yet)...")
         self.local_cache: dict[tuple[str, str], tuple[str, list[SearchDocument]]] = {}
+        self._tenant_generations: dict[str, int] = {}
+
+    def get_tenant_generation(self, tenant_id: str) -> int:
+        return self._tenant_generations.get(tenant_id, 0)
 
     async def get(self, tenant_id: str, query: str) -> Optional[QueryResponse]:
         # Clean query for key lookup
@@ -33,13 +37,24 @@ class SemanticCache:
         logger.info(f"Semantic cache MISS for query: '{query}'")
         return None
 
-    async def set(self, tenant_id: str, query: str, answer: str, sources: list[SearchDocument]) -> None:
+    async def set(
+        self,
+        tenant_id: str,
+        query: str,
+        answer: str,
+        sources: list[SearchDocument],
+        expected_generation: Optional[int] = None,
+    ) -> None:
+        if expected_generation is not None and self.get_tenant_generation(tenant_id) != expected_generation:
+            logger.info(f"Skipping stale cache write for tenant '{tenant_id}' (generation changed during query)")
+            return
         key = (tenant_id, query.strip().lower())
         # Set value
         self.local_cache[key] = (answer, sources)
         logger.info(f"Cached answer for query: '{query}'")
 
     async def invalidate_tenant(self, tenant_id: str) -> int:
+        self._tenant_generations[tenant_id] = self.get_tenant_generation(tenant_id) + 1
         keys_to_remove = [k for k in self.local_cache if k[0] == tenant_id]
         for k in keys_to_remove:
             del self.local_cache[k]

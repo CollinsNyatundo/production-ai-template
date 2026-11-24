@@ -166,6 +166,21 @@ async def test_s3_vectors_and_kms_multi_tenant_rag_isolation(
     )
     assert all(doc.metadata.get("collection_id") != alpha_col_id for doc in alpha_after_delete)
 
+    # Assert directly against raw S3 Vectors index so missing S3 objects cannot mask leftover vectors
+    s3v_client = AWSClientFactory().get_client("s3vectors")
+    raw_after_delete = s3v_client.query_vectors(
+        vectorBucketName=emulator_resources["AWS_S3_VECTOR_BUCKET"],
+        indexName="tenant-tenant-alpha",
+        queryVector={"float32": [0.0] * 64},
+        topK=10,
+        returnMetadata=True,
+    ).get("vectors", [])
+    assert all(
+        (vec.get("metadata") or {}).get("collection_id") != alpha_col_id
+        for vec in raw_after_delete
+        if isinstance(vec, dict)
+    )
+
 
 @pytest.mark.asyncio
 async def test_sqs_native_dlq_redrive(emulator_resources: Dict[str, str]) -> None:
