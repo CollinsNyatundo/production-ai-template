@@ -3,6 +3,9 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
+from app.cloud.secrets import kms_envelope_cipher
+from app.cloud.vector_store import S3VectorKnowledgeStore
+from app.config import settings
 from app.services.connectors.web_scraper import scrape_web_url
 from app.types import JSONDict
 
@@ -88,15 +91,21 @@ async def process_ingestion_job(job_id: str, content_override: Optional[str] = N
         await asyncio.sleep(0.5)
 
         indexed_count = len(raw_chunks)
-        # Chunks are stored in the collection record below.
-        # Full vector embedding is handled by the RAG pipeline at query time.
+        col_id = f"col-{uuid.uuid4().hex[:6]}"
+        if settings.aws_backend_enabled:
+            vector_store = S3VectorKnowledgeStore(kms_cipher=kms_envelope_cipher)
+            indexed_count = await vector_store.index_chunks(
+                tenant_id=str(tenant_id),
+                collection_id=col_id,
+                source_uri=str(uri),
+                chunks=raw_chunks,
+            )
 
         # Step 4: Finalize Job & Add Active Collection
         job["progress"] = 1.0
         job["status"] = "completed"
         job["chunks_processed"] = indexed_count
 
-        col_id = f"col-{uuid.uuid4().hex[:6]}"
         ACTIVE_COLLECTIONS[col_id] = {
             "id": col_id,
             "name": collection_name,

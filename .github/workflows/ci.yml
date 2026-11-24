@@ -31,5 +31,53 @@ jobs:
       - run: ruff format --check .
       - run: mypy app evaluation observability scripts tests
       - run: bandit -r app -ll -ii
-      - run: pytest --cov=app --cov-report=term-missing --cov-fail-under=75
+      - run: pytest -m "not aws_emulator" --cov=app --cov-report=term-missing --cov-fail-under=75
       - run: PYTHONPATH=. python scripts/migrate.py upgrade
+
+  aws-emulator-integration:
+    name: AWS Emulator Live Integration (7 Services, $0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: test
+      JWT_SECRET: test-suite-secret-not-for-production
+      NVIDIA_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Build and start aws/aws-emulator container
+        run: |
+          docker buildx build --load -t aws-emulator:ci -f Dockerfile.aws-emulator .
+          mkdir -p "$HOME/.aws/emulator"
+          chmod 777 "$HOME/.aws/emulator"
+          docker run -d --rm --name aws-emulator-ci \
+            --memory=2g --memory-swap=2g --cap-drop=ALL \
+            -p 127.0.0.1:9297:9297 \
+            -v "$HOME/.aws/emulator:/home/emulator/.aws/emulator" \
+            aws-emulator:ci -p 9297
+          for i in $(seq 1 40); do
+            if [ -f "$HOME/.aws/emulator/9297/ca.pem" ] && [ -f "$HOME/.aws/emulator/9297/emulator_credentials" ]; then
+              break
+            fi
+            sleep 0.5
+          done
+          test -f "$HOME/.aws/emulator/9297/ca.pem"
+      - name: Run live zero-mock AWS Emulator integration suite
+        env:
+          AWS_ENDPOINT_URL: https://127.0.0.1:9297
+          AWS_SHARED_CREDENTIALS_FILE: ${{ runner.home }}/.aws/emulator/9297/emulator_credentials
+          AWS_CONFIG_FILE: ${{ runner.home }}/.aws/emulator/9297/config
+          AWS_CA_BUNDLE: ${{ runner.home }}/.aws/emulator/9297/ca.pem
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_DISABLE_HOST_PREFIX_INJECTION: "true"
+          AWS_REGION: us-east-1
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          pytest -m aws_emulator -v
+      - name: Stop aws-emulator container
+        if: always()
+        run: docker stop aws-emulator-ci || true

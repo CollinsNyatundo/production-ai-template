@@ -1,0 +1,65 @@
+# Compose v2 overlay: run production-ai-template against local aws/aws-emulator ($0 AWS APIs)
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.aws-emulator.yml up -d --build
+#
+# Note: aws-emulator's rcgen TLS certificate carries SANs [localhost, 127.0.0.1, ::1].
+# Sharing aws-emulator's network namespace lets `app` reach https://127.0.0.1:9297 with
+# strict CA verification (no verify=False bypass) while remaining on the Compose network.
+services:
+  aws-emulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.aws-emulator
+    command: ["-p", "9297"]
+    ports:
+      - "127.0.0.1:9297:9297"
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - aws_emulator_certs:/home/emulator/.aws/emulator
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /home/emulator/.aws/emulator/9297/ca.pem && test -f /home/emulator/.aws/emulator/9297/emulator_credentials"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 2s
+
+  app:
+    network_mode: "service:aws-emulator"
+    ports: !reset []
+    depends_on:
+      aws-emulator:
+        condition: service_healthy
+      redis-cache:
+        condition: service_started
+    volumes:
+      - aws_emulator_certs:/certs:ro
+    environment:
+      - AWS_BACKEND_ENABLED=true
+      - AWS_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=https://127.0.0.1:9297
+      - AWS_CA_BUNDLE=/certs/9297/ca.pem
+      - AWS_SHARED_CREDENTIALS_FILE=/certs/9297/emulator_credentials
+      - AWS_CONFIG_FILE=/certs/9297/config
+      - AWS_EC2_METADATA_DISABLED=true
+      - AWS_DISABLE_HOST_PREFIX_INJECTION=true
+      - AWS_S3_BUCKET=production-ai-docs
+      - AWS_S3_VECTOR_BUCKET=production-ai-vectors
+      - AWS_JWT_SECRET_NAME=production-ai/jwt
+      - AWS_DYNAMODB_TABLE=production-ai-state
+      - AWS_CLOUDWATCH_NAMESPACE=ProductionAI/Template
+      - AWS_CLOUDWATCH_LOG_GROUP=/production-ai-template/runtime
+
+  frontend:
+    environment:
+      - BACKEND_API_URL=http://aws-emulator:8000
+
+volumes:
+  aws_emulator_certs:
