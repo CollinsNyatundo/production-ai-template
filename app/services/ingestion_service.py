@@ -7,6 +7,7 @@ from app.cloud.secrets import kms_envelope_cipher
 from app.cloud.vector_store import S3VectorKnowledgeStore
 from app.config import settings
 from app.services.connectors.web_scraper import scrape_web_url
+from app.services.semantic_cache import semantic_cache
 from app.types import JSONDict
 
 INGESTION_JOBS: Dict[str, JSONDict] = {}
@@ -53,6 +54,37 @@ def delete_collection(collection_id: str, tenant_id: str) -> bool:
     if collection and collection.get("tenant_id") == tenant_id:
         del ACTIVE_COLLECTIONS[collection_id]
         return True
+    return False
+
+
+async def delete_collection_async(collection_id: str, tenant_id: str) -> bool:
+    """Delete collection metadata, durable AWS S3/S3 Vectors chunks, and cached answers."""
+    collection = ACTIVE_COLLECTIONS.get(collection_id)
+    if collection is not None:
+        if collection.get("tenant_id") != tenant_id:
+            return False
+        raw_count = collection.get("chunk_count")
+        chunk_count = int(raw_count) if isinstance(raw_count, int) else None
+        if settings.aws_backend_enabled:
+            vector_store = S3VectorKnowledgeStore(kms_cipher=kms_envelope_cipher)
+            await vector_store.delete_collection_chunks(
+                tenant_id=tenant_id,
+                collection_id=collection_id,
+                chunk_count=chunk_count,
+            )
+        del ACTIVE_COLLECTIONS[collection_id]
+        await semantic_cache.invalidate_tenant(tenant_id)
+        return True
+
+    if settings.aws_backend_enabled:
+        vector_store = S3VectorKnowledgeStore(kms_cipher=kms_envelope_cipher)
+        removed = await vector_store.delete_collection_chunks(
+            tenant_id=tenant_id,
+            collection_id=collection_id,
+        )
+        if removed > 0:
+            await semantic_cache.invalidate_tenant(tenant_id)
+            return True
     return False
 
 
@@ -115,6 +147,8 @@ async def process_ingestion_job(job_id: str, content_override: Optional[str] = N
             "tenant_id": tenant_id,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        job["collection_id"] = col_id
+        await semantic_cache.invalidate_tenant(str(tenant_id))
 
     except Exception as ex:
         job["status"] = "failed"

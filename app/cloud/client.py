@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Optional
 
 import boto3
+from botocore.client import BaseClient
 from botocore.config import Config
 
 from app.config import settings
@@ -26,11 +27,16 @@ class AWSClientFactory:
         self._region_name = region_name
         self._endpoint_url = endpoint_url
         self._ca_bundle = ca_bundle
-        self._clients: dict[str, Any] = {}
+        self._clients: dict[str, BaseClient] = {}
 
     @property
     def region_name(self) -> str:
-        return self._region_name or os.environ.get("AWS_REGION") or settings.aws_region
+        return (
+            self._region_name
+            or os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+            or settings.aws_region
+        )
 
     @property
     def endpoint_url(self) -> Optional[str]:
@@ -42,23 +48,29 @@ class AWSClientFactory:
         ca = self._ca_bundle or os.environ.get("AWS_CA_BUNDLE") or settings.aws_ca_bundle
         return ca if ca else True
 
-    def get_client(self, service_name: str) -> Any:
+    def get_client(self, service_name: str) -> BaseClient:
         if service_name in self._clients:
             return self._clients[service_name]
 
-        cfg_kwargs: dict[str, Any] = {"region_name": self.region_name}
         if service_name == "s3":
             # Path-style addressing works cleanly on both AWS Emulator (avoids virtual-host bug) and S3
-            cfg_kwargs["s3"] = {"addressing_style": "path"}
+            cfg = Config(region_name=self.region_name, s3={"addressing_style": "path"})
+        else:
+            cfg = Config(region_name=self.region_name)
 
-        client_kwargs: dict[str, Any] = {
-            "config": Config(**cfg_kwargs),
-            "verify": self.verify,
-        }
         if self.endpoint_url:
-            client_kwargs["endpoint_url"] = self.endpoint_url
-
-        client = boto3.client(service_name, **client_kwargs)
+            client: BaseClient = boto3.client(
+                service_name,
+                config=cfg,
+                verify=self.verify,
+                endpoint_url=self.endpoint_url,
+            )
+        else:
+            client = boto3.client(
+                service_name,
+                config=cfg,
+                verify=self.verify,
+            )
         self._clients[service_name] = client
         return client
 

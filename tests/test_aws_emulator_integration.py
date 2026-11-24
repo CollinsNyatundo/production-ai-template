@@ -24,7 +24,13 @@ from app.cloud.vector_store import S3VectorKnowledgeStore
 from app.components.hybrid_retriever import HybridRetriever
 from app.config import settings
 from app.security.auth import create_access_token, get_current_user
-from app.services.ingestion_service import create_ingestion_job, get_job_status, process_ingestion_job
+from app.services.ingestion_service import (
+    create_ingestion_job,
+    delete_collection_async,
+    get_job_status,
+    process_ingestion_job,
+)
+from app.services.semantic_cache import semantic_cache
 from observability.feedback import feedback_tracker
 from observability.tracer import current_user_context, tracer
 from scripts.bootstrap_aws_emulator import bootstrap_aws_resources
@@ -65,13 +71,16 @@ def emulator_resources() -> Dict[str, str]:
 
 @pytest.mark.asyncio
 async def test_kms_cryptographic_tenant_isolation(emulator_resources: Dict[str, str]) -> None:
-    """Ciphertext encrypted for tenant-alpha MUST fail KMS decryption under tenant-beta."""
+    """Ciphertext encrypted for tenant-alpha (including >4 KiB chunks) MUST fail under tenant-beta."""
     factory = AWSClientFactory()
     cipher = KMSEnvelopeCipher(factory=factory, key_id=emulator_resources["AWS_KMS_KEY_ID"])
 
-    plaintext = "Confidential Kenyan M-Pesa reconciliation policy for Tenant Alpha."
+    plaintext = "Confidential Kenyan M-Pesa reconciliation policy for Tenant Alpha. " + (
+        "Paragraph extension exceeding the 4,096-byte KMS direct Encrypt limit. " * 90
+    )
+    assert len(plaintext.encode("utf-8")) > 4096
     ciphertext_b64 = await cipher.encrypt_text("tenant-alpha", plaintext)
-    assert plaintext not in ciphertext_b64
+    assert "Nairobi" not in ciphertext_b64 and "M-Pesa" not in ciphertext_b64
     assert await cipher.decrypt_text("tenant-alpha", ciphertext_b64) == plaintext
 
     with pytest.raises(PermissionError, match="KMS decryption rejected"):
@@ -144,6 +153,18 @@ async def test_s3_vectors_and_kms_multi_tenant_rag_isolation(
     beta_hits = await retriever.retrieve("Nairobi liquidity buffer percentage", top_k=3, tenant_id="tenant-beta")
     assert all(doc.metadata.get("tenant_id") == "tenant-beta" for doc in beta_hits)
     assert all("24 percent" not in doc.content for doc in beta_hits)
+
+    # Deleting Alpha's collection removes its S3 objects + S3 Vectors and invalidates cached answers
+    alpha_col_id = str(status_alpha["collection_id"])
+    await semantic_cache.set("tenant-alpha", "Nairobi liquidity buffer percentage", "cached 24 percent", alpha_hits)
+    assert await delete_collection_async(alpha_col_id, "tenant-beta") is False
+    assert await delete_collection_async(alpha_col_id, "tenant-alpha") is True
+    assert await semantic_cache.get("tenant-alpha", "Nairobi liquidity buffer percentage") is None
+
+    alpha_after_delete = await S3VectorKnowledgeStore(kms_cipher=KMSEnvelopeCipher()).query(
+        "tenant-alpha", "Nairobi liquidity buffer percentage", top_k=3
+    )
+    assert all(doc.metadata.get("collection_id") != alpha_col_id for doc in alpha_after_delete)
 
 
 @pytest.mark.asyncio
@@ -247,7 +268,7 @@ async def test_cloudwatch_and_xray_live_span_emission(
     )["events"]
     assert any("AWSIntegrationSpan" in str(e.get("message", "")) for e in events)
 
-    # Also verify direct sink returns a valid X-Ray trace id
+    # Verify direct sink succeeds AND X-Ray accepted the segment (UnprocessedTraceSegments == [])
     sink = AWSObservabilitySink(
         factory=factory,
         namespace="ProductionAI/LiveTest",
@@ -255,6 +276,23 @@ async def test_cloudwatch_and_xray_live_span_emission(
     )
     trace_id = await sink.emit_span("DirectSinkCheck", 4.2, {"tenant.id": "tenant-alpha"}, time.time() - 0.01)
     assert trace_id is not None and trace_id.startswith("1-")
+
+    # Direct raw X-Ray verification: prove UnprocessedTraceSegments is empty on accepted segment
+    xray = factory.get_client("xray")
+    raw_resp = xray.put_trace_segments(
+        TraceSegmentDocuments=[
+            json.dumps(
+                {
+                    "name": "DirectXRayVerify",
+                    "id": uuid.uuid4().hex[:16],
+                    "trace_id": f"1-{int(time.time()):08x}-{uuid.uuid4().hex[:24]}",
+                    "start_time": time.time() - 0.02,
+                    "end_time": time.time(),
+                }
+            )
+        ]
+    )
+    assert raw_resp.get("UnprocessedTraceSegments", []) == []
 
 
 @pytest.mark.asyncio

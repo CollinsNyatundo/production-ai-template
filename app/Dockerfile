@@ -34,6 +34,7 @@ ENV TIKTOKEN_CACHE_DIR=/workspace/.tiktoken_cache
 COPY app /workspace/app
 COPY evaluation /workspace/evaluation
 COPY observability /workspace/observability
+COPY scripts /workspace/scripts
 COPY README.md /workspace/
 
 ENV PORT=8000

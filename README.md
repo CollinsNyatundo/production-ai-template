@@ -75,9 +75,11 @@ You can run and integration-test the full 7-service AWS cloud-native backend loc
 ```bash
 # 1. Build and start aws-emulator locally (telemetry off, ~200 MiB RAM, ~1s cold start)
 docker buildx build --load -t aws-emulator:local -f Dockerfile.aws-emulator .
-mkdir -p ~/.aws/emulator
-docker run -d --rm --name aws-emulator --memory=2g --memory-swap=2g --cap-drop=ALL \
-  -p 127.0.0.1:9297:9297 -v "$HOME/.aws/emulator:/home/emulator/.aws/emulator" \
+mkdir -p "$HOME/.aws/emulator" && chmod 700 "$HOME/.aws/emulator"
+docker run -d --rm --name aws-emulator --user "$(id -u):$(id -g)" \
+  --memory=2g --memory-swap=2g --cap-drop=ALL \
+  -p 127.0.0.1:9297:9297 -e HOME=/tmp/emu-home \
+  -v "$HOME/.aws/emulator:/tmp/emu-home/.aws/emulator" \
   aws-emulator:local -p 9297
 
 # 2. Point AWS SDKs at the emulator and bootstrap all 7 services idempotently

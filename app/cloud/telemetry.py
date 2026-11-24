@@ -120,7 +120,10 @@ class AWSObservabilitySink:
                 "metadata": {"attributes": dict(attributes)},
             }
         )
-        xray.put_trace_segments(TraceSegmentDocuments=[segment_doc])
+        resp = xray.put_trace_segments(TraceSegmentDocuments=[segment_doc])
+        unprocessed = resp.get("UnprocessedTraceSegments", []) if isinstance(resp, dict) else []
+        if unprocessed:
+            raise RuntimeError(f"AWS X-Ray rejected trace segment(s): {unprocessed}")
         return trace_id
 
     async def emit_span(

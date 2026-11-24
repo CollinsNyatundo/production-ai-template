@@ -141,6 +141,12 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials.",
             )
+        except Exception as e:
+            logger.error(f"JWT secret resolution failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service unavailable.",
+            )
 
     # Fallback to local anonymous developer access if in development environment
     if settings.app_env == "development":

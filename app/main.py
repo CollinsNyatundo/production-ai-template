@@ -2,11 +2,12 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -22,6 +23,7 @@ from app.services.conversation import conversation_service
 from app.services.hooks import lifecycle_hooks
 from app.services.rag_pipeline import rag_pipeline
 from app.services.state_store import state_store
+from observability.feedback import feedback_tracker
 from observability.tracer import current_user_context
 
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +67,28 @@ async def health_check():
 
 def _scoped_session_id(current_user: User, session_id: str) -> str:
     return f"{current_user.tenant_id}:{session_id}"
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=128)
+    rating: Literal["thumbs_up", "thumbs_down"]
+    comment: str = Field(default="", max_length=1000)
+
+
+@app.post("/api/feedback")
+@limiter.limit(f"{settings.rate_limit_calls}/{settings.rate_limit_period} seconds")
+async def submit_feedback_endpoint(
+    payload: FeedbackRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    feedback_id = await feedback_tracker.log_user_feedback(
+        session_id=_scoped_session_id(current_user, payload.session_id),
+        rating=payload.rating,
+        comment=payload.comment,
+        tenant_id=current_user.tenant_id,
+    )
+    return {"status": "recorded", "feedback_id": feedback_id, "tenant_id": current_user.tenant_id}
 
 
 @app.delete("/api/session/{session_id}")

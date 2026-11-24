@@ -7,7 +7,7 @@ import hashlib
 import logging
 import math
 import re
-from typing import Any, List, Optional
+from typing import List, Optional, TypedDict
 
 from botocore.exceptions import ClientError
 
@@ -15,10 +15,24 @@ from app.cloud.client import AWSClientFactory, aws_client_factory
 from app.cloud.secrets import KMSEnvelopeCipher
 from app.config import settings
 from app.models import SearchDocument
+from app.types import JSONDict
 
 logger = logging.getLogger("app.cloud.vector_store")
 
 _TENANT_SAFE_RE = re.compile(r"[^a-z0-9-]+")
+_CHUNK_KEY_RE = re.compile(r"/chunk-(\d+)\.txt$")
+_S3_VECTORS_MAX_BATCH = 500
+_S3_DELETE_MAX_BATCH = 1000
+
+
+class VectorFloat32Data(TypedDict):
+    float32: List[float]
+
+
+class VectorRecord(TypedDict):
+    key: str
+    data: VectorFloat32Data
+    metadata: JSONDict
 
 
 def sanitize_index_name(tenant_id: str) -> str:
@@ -122,15 +136,69 @@ class S3VectorKnowledgeStore:
         resp = s3.get_object(Bucket=self.bucket_name, Key=key)
         return bytes(resp["Body"].read())
 
-    def _put_vectors_sync(self, index_name: str, vectors: List[dict[str, Any]]) -> None:
+    def _list_s3_keys_sync(self, prefix: str) -> List[str]:
+        s3 = self._factory.get_client("s3")
+        keys: List[str] = []
+        continuation_token: Optional[str] = None
+        while True:
+            if continuation_token:
+                resp = s3.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix=prefix,
+                    ContinuationToken=continuation_token,
+                )
+            else:
+                resp = s3.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
+            contents = resp.get("Contents", [])
+            if isinstance(contents, list):
+                for entry in contents:
+                    if isinstance(entry, dict) and entry.get("Key"):
+                        keys.append(str(entry["Key"]))
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+            if not token:
+                break
+            continuation_token = str(token)
+        return keys
+
+    def _delete_s3_keys_sync(self, keys: List[str]) -> None:
+        if not keys:
+            return
+        s3 = self._factory.get_client("s3")
+        for start in range(0, len(keys), _S3_DELETE_MAX_BATCH):
+            batch = keys[start : start + _S3_DELETE_MAX_BATCH]
+            s3.delete_objects(
+                Bucket=self.bucket_name,
+                Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+            )
+
+    def _delete_vectors_sync(self, index_name: str, vector_keys: List[str]) -> None:
+        if not vector_keys:
+            return
+        s3v = self._factory.get_client("s3vectors")
+        for start in range(0, len(vector_keys), _S3_VECTORS_MAX_BATCH):
+            batch = vector_keys[start : start + _S3_VECTORS_MAX_BATCH]
+            try:
+                s3v.delete_vectors(
+                    vectorBucketName=self.vector_bucket_name,
+                    indexName=index_name,
+                    keys=batch,
+                )
+            except ClientError as exc:
+                code = str(exc.response.get("Error", {}).get("Code", ""))
+                if "NotFound" not in code:
+                    raise
+
+    def _put_vectors_batch_sync(self, index_name: str, batch: List[VectorRecord]) -> None:
         s3v = self._factory.get_client("s3vectors")
         s3v.put_vectors(
             vectorBucketName=self.vector_bucket_name,
             indexName=index_name,
-            vectors=vectors,
+            vectors=batch,
         )
 
-    def _query_vectors_sync(self, index_name: str, query_vec: List[float], top_k: int) -> List[dict[str, Any]]:
+    def _query_vectors_sync(self, index_name: str, query_vec: List[float], top_k: int) -> List[JSONDict]:
         s3v = self._factory.get_client("s3vectors")
         try:
             resp = s3v.query_vectors(
@@ -156,50 +224,71 @@ class S3VectorKnowledgeStore:
         source_uri: str,
         chunks: List[str],
     ) -> int:
-        """Archive tenant chunks in S3 (KMS-wrapped when configured) and index into S3 Vectors."""
+        """Archive tenant chunks in S3 (KMS-wrapped when configured) and batch-index into S3 Vectors."""
         if not chunks:
             return 0
 
         index_name = sanitize_index_name(tenant_id)
         await asyncio.to_thread(self._ensure_tenant_index_sync, index_name)
 
-        vectors: List[dict[str, Any]] = []
-        for idx, chunk in enumerate(chunks):
-            key = f"tenants/{tenant_id}/collections/{collection_id}/chunk-{idx:04d}.txt"
-            encrypted = False
-            if self._kms_cipher and self._kms_cipher.key_id:
-                payload_text = await self._kms_cipher.encrypt_text(tenant_id, chunk)
-                body = payload_text.encode("utf-8")
-                encrypted = True
-            else:
-                body = chunk.encode("utf-8")
+        vectors: List[VectorRecord] = []
+        written_s3_keys: List[str] = []
+        written_vector_keys: List[str] = []
+        try:
+            for idx, chunk in enumerate(chunks):
+                key = f"tenants/{tenant_id}/collections/{collection_id}/chunk-{idx:04d}.txt"
+                encrypted = False
+                if self._kms_cipher and self._kms_cipher.key_id:
+                    payload_text = await self._kms_cipher.encrypt_text(tenant_id, chunk)
+                    body = payload_text.encode("utf-8")
+                    encrypted = True
+                else:
+                    body = chunk.encode("utf-8")
 
-            await asyncio.to_thread(
-                self._put_s3_object_sync,
-                key,
-                body,
-                {
-                    "tenant_id": tenant_id,
-                    "collection_id": collection_id,
-                    "kms_encrypted": "true" if encrypted else "false",
-                },
-            )
-            vectors.append(
-                {
-                    "key": f"{collection_id}:{idx:04d}",
-                    "data": {"float32": deterministic_embed(chunk, self._dimension)},
-                    "metadata": {
+                await asyncio.to_thread(
+                    self._put_s3_object_sync,
+                    key,
+                    body,
+                    {
                         "tenant_id": tenant_id,
                         "collection_id": collection_id,
-                        "s3_key": key,
-                        "source_uri": source_uri[:200],
-                        "kms_encrypted": encrypted,
-                        "preview": chunk[:400] if not encrypted else "",
+                        "kms_encrypted": "true" if encrypted else "false",
                     },
-                }
-            )
+                )
+                written_s3_keys.append(key)
+                vectors.append(
+                    {
+                        "key": f"{collection_id}:{idx:04d}",
+                        "data": {"float32": deterministic_embed(chunk, self._dimension)},
+                        "metadata": {
+                            "tenant_id": tenant_id,
+                            "collection_id": collection_id,
+                            "s3_key": key,
+                            "source_uri": source_uri[:200],
+                            "kms_encrypted": encrypted,
+                            "preview": chunk[:400] if not encrypted else "",
+                        },
+                    }
+                )
 
-        await asyncio.to_thread(self._put_vectors_sync, index_name, vectors)
+            for start in range(0, len(vectors), _S3_VECTORS_MAX_BATCH):
+                batch = vectors[start : start + _S3_VECTORS_MAX_BATCH]
+                await asyncio.to_thread(self._put_vectors_batch_sync, index_name, batch)
+                written_vector_keys.extend(v["key"] for v in batch)
+        except Exception:
+            # Clean up partial writes so failed jobs leave neither orphaned vectors nor archived objects
+            if written_vector_keys:
+                try:
+                    await asyncio.to_thread(self._delete_vectors_sync, index_name, written_vector_keys)
+                except Exception as cleanup_exc:
+                    logger.warning("Partial vector cleanup failed for '%s': %s", collection_id, cleanup_exc)
+            if written_s3_keys:
+                try:
+                    await asyncio.to_thread(self._delete_s3_keys_sync, written_s3_keys)
+                except Exception as cleanup_exc:
+                    logger.warning("Partial S3 cleanup failed for '%s': %s", collection_id, cleanup_exc)
+            raise
+
         logger.info(
             "Indexed %d chunks for tenant '%s' into S3 Vectors index '%s'",
             len(vectors),
@@ -207,6 +296,42 @@ class S3VectorKnowledgeStore:
             index_name,
         )
         return len(vectors)
+
+    async def delete_collection_chunks(
+        self,
+        tenant_id: str,
+        collection_id: str,
+        chunk_count: Optional[int] = None,
+    ) -> int:
+        """Delete a tenant collection's vectors from S3 Vectors and archived chunks from S3."""
+        index_name = sanitize_index_name(tenant_id)
+        prefix = f"tenants/{tenant_id}/collections/{collection_id}/"
+        s3_keys = await asyncio.to_thread(self._list_s3_keys_sync, prefix)
+
+        vector_key_set: set[str] = set()
+        for key in s3_keys:
+            match = _CHUNK_KEY_RE.search(key)
+            if match:
+                vector_key_set.add(f"{collection_id}:{match.group(1)}")
+        if chunk_count and chunk_count > 0:
+            for idx in range(chunk_count):
+                vector_key_set.add(f"{collection_id}:{idx:04d}")
+
+        vector_keys = sorted(vector_key_set)
+        if vector_keys:
+            await asyncio.to_thread(self._delete_vectors_sync, index_name, vector_keys)
+        if s3_keys:
+            await asyncio.to_thread(self._delete_s3_keys_sync, s3_keys)
+
+        removed = max(len(vector_keys), len(s3_keys))
+        logger.info(
+            "Deleted %d vectors and %d S3 objects for tenant '%s' collection '%s'",
+            len(vector_keys),
+            len(s3_keys),
+            tenant_id,
+            collection_id,
+        )
+        return removed
 
     async def query(self, tenant_id: str, query_text: str, top_k: int = 5) -> List[SearchDocument]:
         """Query only the caller's tenant-isolated S3 Vectors index and hydrate from S3."""
@@ -217,7 +342,7 @@ class S3VectorKnowledgeStore:
         docs: List[SearchDocument] = []
         for hit in hits:
             meta = hit.get("metadata")
-            meta_dict: dict[str, Any] = dict(meta) if isinstance(meta, dict) else {}
+            meta_dict: JSONDict = dict(meta) if isinstance(meta, dict) else {}
             # Defense-in-depth tenant assertion beyond per-tenant index partitioning
             if meta_dict.get("tenant_id") != tenant_id:
                 logger.warning("Skipping cross-tenant vector mismatch for tenant '%s'", tenant_id)
@@ -226,7 +351,13 @@ class S3VectorKnowledgeStore:
             s3_key = str(meta_dict.get("s3_key", ""))
             content = str(meta_dict.get("preview", ""))
             if s3_key:
-                raw_bytes = await asyncio.to_thread(self._get_s3_object_sync, s3_key)
+                try:
+                    raw_bytes = await asyncio.to_thread(self._get_s3_object_sync, s3_key)
+                except ClientError as exc:
+                    code = str(exc.response.get("Error", {}).get("Code", ""))
+                    if "NoSuchKey" in code or "NotFound" in code:
+                        continue
+                    raise
                 raw_text = raw_bytes.decode("utf-8")
                 if meta_dict.get("kms_encrypted") and self._kms_cipher:
                     content = await self._kms_cipher.decrypt_text(tenant_id, raw_text)

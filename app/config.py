@@ -66,8 +66,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def check_production_secrets(self) -> "Settings":
-        if self.app_env not in ("development", "test", "testing") and self.jwt_secret == _INSECURE_DEFAULT_JWT_SECRET:
-            raise ValueError(f"Refusing to start: APP_ENV='{self.app_env}' but JWT_SECRET is still default.")
+        if self.app_env not in ("development", "test", "testing"):
+            if self.aws_backend_enabled:
+                if not self.aws_jwt_secret_name.strip():
+                    raise ValueError(
+                        f"Refusing to start: APP_ENV='{self.app_env}' with AWS_BACKEND_ENABLED=true "
+                        "requires AWS_JWT_SECRET_NAME."
+                    )
+            elif not self.jwt_secret.strip() or self.jwt_secret == _INSECURE_DEFAULT_JWT_SECRET:
+                raise ValueError(f"Refusing to start: APP_ENV='{self.app_env}' but JWT_SECRET is still default.")
         return self
 
 

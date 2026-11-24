@@ -1,18 +1,22 @@
+import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from app.cloud.queue_store import sqs_ingestion_queue
+from app.config import settings
 from app.security.auth import User, get_current_user
 from app.services.connectors.file_extractor import extract_file_content
 from app.services.ingestion_service import (
     create_ingestion_job,
-    delete_collection,
+    delete_collection_async,
     get_job_status,
     list_collections,
     process_ingestion_job,
 )
 
+logger = logging.getLogger("app.api.ingest")
 router = APIRouter(prefix="/api/v1", tags=["Ingestion"])
 _MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
@@ -43,6 +47,19 @@ async def start_ingestion(
     c_name = payload.collection_name or f"{st_type}-{uri.split('/')[-1]}"
 
     job_id = create_ingestion_job(st_type, uri, t_id, c_name)
+    if settings.aws_backend_enabled and settings.aws_sqs_queue_url:
+        try:
+            await sqs_ingestion_queue.enqueue_job(
+                {
+                    "job_id": job_id,
+                    "tenant_id": t_id,
+                    "source_type": st_type,
+                    "uri": uri,
+                    "collection_name": c_name,
+                }
+            )
+        except Exception as exc:
+            logger.warning("SQS enqueue skipped for job '%s': %s", job_id, exc)
     bg_tasks.add_task(process_ingestion_job, job_id, None)
 
     return {
@@ -73,6 +90,19 @@ async def start_file_ingestion(
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
 
     job_id = create_ingestion_job("file", uri, current_user.tenant_id, c_name)
+    if settings.aws_backend_enabled and settings.aws_sqs_queue_url:
+        try:
+            await sqs_ingestion_queue.enqueue_job(
+                {
+                    "job_id": job_id,
+                    "tenant_id": current_user.tenant_id,
+                    "source_type": "file",
+                    "uri": uri,
+                    "collection_name": c_name,
+                }
+            )
+        except Exception as exc:
+            logger.warning("SQS enqueue skipped for file job '%s': %s", job_id, exc)
     bg_tasks.add_task(process_ingestion_job, job_id, content_override)
 
     return {
@@ -101,7 +131,7 @@ async def get_collections(current_user: User = Depends(get_current_user)):
 @router.delete("/collections/{collection_id}")
 async def remove_collection(collection_id: str, current_user: User = Depends(get_current_user)):
     _require_scope(current_user, "write")
-    success = delete_collection(collection_id, current_user.tenant_id)
+    success = await delete_collection_async(collection_id, current_user.tenant_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"Collection '{collection_id}' not found.")
     return {"status": "deleted", "collection_id": collection_id}

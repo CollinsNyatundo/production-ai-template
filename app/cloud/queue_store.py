@@ -8,10 +8,11 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from app.cloud.client import AWSClientFactory, aws_client_factory
 from app.config import settings
+from app.types import JSONDict
 
 logger = logging.getLogger("app.cloud.queue_store")
 
@@ -20,7 +21,7 @@ logger = logging.getLogger("app.cloud.queue_store")
 class QueuedMessage:
     message_id: str
     receipt_handle: str
-    body: dict[str, Any]
+    body: JSONDict
 
 
 class SQSIngestionQueue:
@@ -38,7 +39,7 @@ class SQSIngestionQueue:
     def queue_url(self) -> str:
         return self._queue_url or settings.aws_sqs_queue_url
 
-    def _send_sync(self, payload: dict[str, Any], target_url: str) -> str:
+    def _send_sync(self, payload: JSONDict, target_url: str) -> str:
         sqs = self._factory.get_client("sqs")
         resp = sqs.send_message(QueueUrl=target_url, MessageBody=json.dumps(payload))
         return str(resp["MessageId"])
@@ -52,11 +53,13 @@ class SQSIngestionQueue:
         )
         out: List[QueuedMessage] = []
         for raw in resp.get("Messages", []):
+            parsed = json.loads(str(raw["Body"]))
+            body: JSONDict = parsed if isinstance(parsed, dict) else {"value": parsed}
             out.append(
                 QueuedMessage(
                     message_id=str(raw["MessageId"]),
                     receipt_handle=str(raw["ReceiptHandle"]),
-                    body=json.loads(str(raw["Body"])),
+                    body=body,
                 )
             )
         return out
@@ -65,7 +68,7 @@ class SQSIngestionQueue:
         sqs = self._factory.get_client("sqs")
         sqs.delete_message(QueueUrl=target_url, ReceiptHandle=receipt_handle)
 
-    async def enqueue_job(self, job_payload: dict[str, Any], queue_url: Optional[str] = None) -> str:
+    async def enqueue_job(self, job_payload: JSONDict, queue_url: Optional[str] = None) -> str:
         url = queue_url or self.queue_url
         if not url:
             raise ValueError("AWS_SQS_QUEUE_URL is required to enqueue ingestion jobs.")

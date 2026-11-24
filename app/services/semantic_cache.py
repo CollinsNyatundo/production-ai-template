@@ -39,5 +39,13 @@ class SemanticCache:
         self.local_cache[key] = (answer, sources)
         logger.info(f"Cached answer for query: '{query}'")
 
+    async def invalidate_tenant(self, tenant_id: str) -> int:
+        keys_to_remove = [k for k in self.local_cache if k[0] == tenant_id]
+        for k in keys_to_remove:
+            del self.local_cache[k]
+        if keys_to_remove:
+            logger.info(f"Invalidated {len(keys_to_remove)} cached entries for tenant '{tenant_id}'")
+        return len(keys_to_remove)
+
 
 semantic_cache = SemanticCache()

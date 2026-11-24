@@ -40,12 +40,18 @@ def bootstrap_aws_resources(
     table_name = dynamodb_table or settings.aws_dynamodb_table
     cw_log_group = log_group or settings.aws_cloudwatch_log_group
 
-    # 1. S3 Bucket
+    # 1. S3 Bucket (AWS requires LocationConstraint outside us-east-1)
     s3 = client_factory.get_client("s3")
     try:
         s3.head_bucket(Bucket=bucket)
     except ClientError:
-        s3.create_bucket(Bucket=bucket)
+        if client_factory.region_name == "us-east-1":
+            s3.create_bucket(Bucket=bucket)
+        else:
+            s3.create_bucket(
+                Bucket=bucket,
+                CreateBucketConfiguration={"LocationConstraint": client_factory.region_name},
+            )
 
     # 2. S3 Vectors Bucket
     s3v = client_factory.get_client("s3vectors")
@@ -150,9 +156,14 @@ def bootstrap_aws_resources(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bootstrap AWS Emulator resources for production-ai-template.")
     parser.add_argument("--format", choices=["json", "env"], default="json")
+    parser.add_argument("--env-file", default="", help="Optional path to write KEY=VALUE environment lines.")
     args = parser.parse_args()
 
     result = bootstrap_aws_resources()
+    if args.env_file:
+        with open(args.env_file, "w", encoding="utf-8") as fh:
+            for key, value in result.items():
+                fh.write(f"{key}={value}\n")
     if args.format == "env":
         for key, value in result.items():
             print(f"{key}={value}")
