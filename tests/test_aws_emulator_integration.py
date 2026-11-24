@@ -20,7 +20,7 @@ from app.cloud.client import AWSClientFactory
 from app.cloud.queue_store import DynamoDBStateRepository, SQSIngestionQueue
 from app.cloud.secrets import AWSSecretsProvider, KMSEnvelopeCipher
 from app.cloud.telemetry import AWSObservabilitySink
-from app.cloud.vector_store import S3VectorKnowledgeStore
+from app.cloud.vector_store import S3VectorKnowledgeStore, deterministic_embed
 from app.components.hybrid_retriever import HybridRetriever
 from app.config import settings
 from app.security.auth import create_access_token, get_current_user
@@ -171,7 +171,7 @@ async def test_s3_vectors_and_kms_multi_tenant_rag_isolation(
     raw_after_delete = s3v_client.query_vectors(
         vectorBucketName=emulator_resources["AWS_S3_VECTOR_BUCKET"],
         indexName="tenant-tenant-alpha",
-        queryVector={"float32": [0.0] * 64},
+        queryVector={"float32": deterministic_embed("Nairobi liquidity buffer percentage", 64)},
         topK=10,
         returnMetadata=True,
     ).get("vectors", [])
