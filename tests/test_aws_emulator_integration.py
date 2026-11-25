@@ -66,6 +66,14 @@ def emulator_resources() -> Dict[str, str]:
         queue_prefix=f"prod-ai-ingest-{suffix}",
     )
     assert second["AWS_KMS_KEY_ID"] == resources["AWS_KMS_KEY_ID"]
+    sqs_client = factory.get_client("sqs")
+    q_attrs = sqs_client.get_queue_attributes(
+        QueueUrl=resources["AWS_SQS_QUEUE_URL"],
+        AttributeNames=["VisibilityTimeout", "RedrivePolicy"],
+    )["Attributes"]
+    assert q_attrs["VisibilityTimeout"] == "30"
+    redrive = json.loads(str(q_attrs["RedrivePolicy"]))
+    assert int(redrive["maxReceiveCount"]) == 3
     return resources
 
 

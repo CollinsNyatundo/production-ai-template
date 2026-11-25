@@ -59,9 +59,11 @@ class SQSIngestionWorker:
     def _use_shared_state(self) -> bool:
         return bool(settings.aws_backend_enabled and settings.aws_dynamodb_table)
 
-    async def _get_max_receive_count(self) -> int:
+    async def _get_max_receive_count(self) -> Optional[int]:
         if self._cached_max_receive is None:
-            self._cached_max_receive = await self._queue.get_max_receive_count(default=self._default_max_receive_count)
+            resolved = await self._queue.get_max_receive_count()
+            if resolved is not None:
+                self._cached_max_receive = resolved
         return self._cached_max_receive
 
     async def _cleanup_staging_best_effort(self, staging_s3_key: str) -> None:
@@ -152,7 +154,9 @@ class SQSIngestionWorker:
         INGESTION_JOBS[job_id] = seed_job
 
         max_receive_count = await self._get_max_receive_count()
-        is_final_attempt = message.receive_count >= max_receive_count
+        # Only treat an attempt as terminal when the queue's RedrivePolicy was actually read.
+        # If unreadable, preserve staged objects and mark "retrying" so retries never lose uploads.
+        is_final_attempt = max_receive_count is not None and message.receive_count >= max_receive_count
         failure_status = "failed" if is_final_attempt else "retrying"
 
         done_event = asyncio.Event()
@@ -183,11 +187,11 @@ class SQSIngestionWorker:
             job = await get_job_status_async(job_id, tenant_id)
             if not job or job.get("status") != "completed":
                 logger.warning(
-                    "Ingestion job '%s' did not complete (status=%s, attempt=%d/%d); leaving SQS message unacknowledged.",
+                    "Ingestion job '%s' did not complete (status=%s, attempt=%d/%s); leaving SQS message unacknowledged.",
                     job_id,
                     job.get("status") if job else "missing",
                     message.receive_count,
-                    max_receive_count,
+                    max_receive_count if max_receive_count is not None else "unknown",
                 )
                 if is_final_attempt:
                     await self._cleanup_staging_best_effort(staging_s3_key)

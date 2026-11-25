@@ -87,7 +87,7 @@ class SQSIngestionQueue:
             VisibilityTimeout=visibility_timeout,
         )
 
-    def _get_max_receive_count_sync(self, target_url: str, default: int) -> int:
+    def _get_max_receive_count_sync(self, target_url: str) -> Optional[int]:
         sqs = self._factory.get_client("sqs")
         try:
             resp = sqs.get_queue_attributes(QueueUrl=target_url, AttributeNames=["RedrivePolicy"])
@@ -98,7 +98,7 @@ class SQSIngestionQueue:
                     return max(1, int(policy["maxReceiveCount"]))
         except (ClientError, ValueError, TypeError, json.JSONDecodeError):
             pass
-        return default
+        return None
 
     async def enqueue_job(self, job_payload: JSONDict, queue_url: Optional[str] = None) -> str:
         url = queue_url or self.queue_url
@@ -135,12 +135,12 @@ class SQSIngestionQueue:
             return
         await asyncio.to_thread(self._change_visibility_sync, url, receipt_handle, visibility_timeout)
 
-    async def get_max_receive_count(self, default: int = 3, queue_url: Optional[str] = None) -> int:
-        """Return maxReceiveCount from the queue's RedrivePolicy or ``default``."""
+    async def get_max_receive_count(self, queue_url: Optional[str] = None) -> Optional[int]:
+        """Return ``maxReceiveCount`` from the queue's RedrivePolicy, or ``None`` if unavailable."""
         url = queue_url or self.queue_url
         if not url:
-            return default
-        return await asyncio.to_thread(self._get_max_receive_count_sync, url, default)
+            return None
+        return await asyncio.to_thread(self._get_max_receive_count_sync, url)
 
 
 class DynamoDBStateRepository:
@@ -184,26 +184,39 @@ class DynamoDBStateRepository:
     def _list_feedback_sync(self, tenant_id: str, session_id: Optional[str] = None) -> List[dict[str, str]]:
         ddb = self._factory.get_client("dynamodb")
         prefix = f"FEEDBACK#{session_id}#" if session_id else "FEEDBACK#"
-        resp = ddb.query(
-            TableName=self.table_name,
-            KeyConditionExpression="tenant_id = :t AND begins_with(item_key, :p)",
-            ExpressionAttributeValues={
-                ":t": {"S": tenant_id},
-                ":p": {"S": prefix},
-            },
-        )
         rows: List[dict[str, str]] = []
-        for item in resp.get("Items", []):
-            rows.append(
-                {
-                    "tenant_id": str(item["tenant_id"]["S"]),
-                    "item_key": str(item["item_key"]["S"]),
-                    "session_id": str(item["session_id"]["S"]),
-                    "rating": str(item["rating"]["S"]),
-                    "comment": str(item.get("comment", {}).get("S", "")),
-                    "created_at": str(item.get("created_at", {}).get("S", "")),
-                }
-            )
+        last_key: Optional[dict[str, object]] = None
+        while True:
+            if last_key is not None:
+                resp = ddb.query(
+                    TableName=self.table_name,
+                    KeyConditionExpression="tenant_id = :t AND begins_with(item_key, :p)",
+                    ExpressionAttributeValues={":t": {"S": tenant_id}, ":p": {"S": prefix}},
+                    ExclusiveStartKey=last_key,
+                    ConsistentRead=True,
+                )
+            else:
+                resp = ddb.query(
+                    TableName=self.table_name,
+                    KeyConditionExpression="tenant_id = :t AND begins_with(item_key, :p)",
+                    ExpressionAttributeValues={":t": {"S": tenant_id}, ":p": {"S": prefix}},
+                    ConsistentRead=True,
+                )
+            for item in resp.get("Items", []):
+                rows.append(
+                    {
+                        "tenant_id": str(item["tenant_id"]["S"]),
+                        "item_key": str(item["item_key"]["S"]),
+                        "session_id": str(item["session_id"]["S"]),
+                        "rating": str(item["rating"]["S"]),
+                        "comment": str(item.get("comment", {}).get("S", "")),
+                        "created_at": str(item.get("created_at", {}).get("S", "")),
+                    }
+                )
+            next_key = resp.get("LastEvaluatedKey")
+            if not isinstance(next_key, dict) or not next_key:
+                break
+            last_key = next_key
         return rows
 
     def _put_ingestion_job_sync(
@@ -234,6 +247,7 @@ class DynamoDBStateRepository:
         resp = ddb.get_item(
             TableName=self.table_name,
             Key={"tenant_id": {"S": tenant_id}, "item_key": {"S": f"JOB#{job_id}"}},
+            ConsistentRead=True,
         )
         item = resp.get("Item")
         if not isinstance(item, dict):
@@ -267,6 +281,7 @@ class DynamoDBStateRepository:
         existing_resp = ddb.get_item(
             TableName=self.table_name,
             Key={"tenant_id": {"S": tenant_id}, "item_key": {"S": sk}},
+            ConsistentRead=True,
         )
         existing = existing_resp.get("Item")
         if isinstance(existing, dict) and existing.get("status", {}).get("S") == "completed":
@@ -306,6 +321,7 @@ class DynamoDBStateRepository:
             latest = ddb.get_item(
                 TableName=self.table_name,
                 Key={"tenant_id": {"S": tenant_id}, "item_key": {"S": sk}},
+                ConsistentRead=True,
             ).get("Item")
             if isinstance(latest, dict) and latest.get("status", {}).get("S") == "completed":
                 return "completed"
@@ -359,6 +375,7 @@ class DynamoDBStateRepository:
         resp = ddb.get_item(
             TableName=self.table_name,
             Key={"tenant_id": {"S": tenant_id}, "item_key": {"S": f"COLLECTION#{collection_id}"}},
+            ConsistentRead=True,
         )
         item = resp.get("Item")
         if not isinstance(item, dict):
@@ -371,21 +388,34 @@ class DynamoDBStateRepository:
 
     def _list_collections_sync(self, tenant_id: str) -> List[JSONDict]:
         ddb = self._factory.get_client("dynamodb")
-        resp = ddb.query(
-            TableName=self.table_name,
-            KeyConditionExpression="tenant_id = :t AND begins_with(item_key, :p)",
-            ExpressionAttributeValues={
-                ":t": {"S": tenant_id},
-                ":p": {"S": "COLLECTION#"},
-            },
-        )
         rows: List[JSONDict] = []
-        for item in resp.get("Items", []):
-            raw_payload = item.get("payload", {}).get("S")
-            if isinstance(raw_payload, str):
-                parsed = json.loads(raw_payload)
-                if isinstance(parsed, dict):
-                    rows.append(cast(JSONDict, parsed))
+        last_key: Optional[dict[str, object]] = None
+        while True:
+            if last_key is not None:
+                resp = ddb.query(
+                    TableName=self.table_name,
+                    KeyConditionExpression="tenant_id = :t AND begins_with(item_key, :p)",
+                    ExpressionAttributeValues={":t": {"S": tenant_id}, ":p": {"S": "COLLECTION#"}},
+                    ExclusiveStartKey=last_key,
+                    ConsistentRead=True,
+                )
+            else:
+                resp = ddb.query(
+                    TableName=self.table_name,
+                    KeyConditionExpression="tenant_id = :t AND begins_with(item_key, :p)",
+                    ExpressionAttributeValues={":t": {"S": tenant_id}, ":p": {"S": "COLLECTION#"}},
+                    ConsistentRead=True,
+                )
+            for item in resp.get("Items", []):
+                raw_payload = item.get("payload", {}).get("S")
+                if isinstance(raw_payload, str):
+                    parsed = json.loads(raw_payload)
+                    if isinstance(parsed, dict):
+                        rows.append(cast(JSONDict, parsed))
+            next_key = resp.get("LastEvaluatedKey")
+            if not isinstance(next_key, dict) or not next_key:
+                break
+            last_key = next_key
         return rows
 
     def _delete_collection_sync(self, tenant_id: str, collection_id: str) -> bool:
@@ -402,6 +432,7 @@ class DynamoDBStateRepository:
         resp = ddb.get_item(
             TableName=self.table_name,
             Key={"tenant_id": {"S": tenant_id}, "item_key": {"S": "CACHE_GEN"}},
+            ConsistentRead=True,
         )
         item = resp.get("Item")
         if not isinstance(item, dict):

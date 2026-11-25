@@ -238,8 +238,11 @@ async def process_ingestion_job(
         ACTIVE_COLLECTIONS[col_id] = collection_record
         if _use_dynamodb_state():
             await dynamodb_state_repo.put_collection(tenant_id, collection_record)
-            await dynamodb_state_repo.put_ingestion_job(tenant_id, job)
+        # Invalidate tenant cache BEFORE persisting "completed" so a crash between the two
+        # triggers a clean SQS retry rather than acking a completed job with stale caches.
         await semantic_cache.invalidate_tenant(tenant_id)
+        if _use_dynamodb_state():
+            await dynamodb_state_repo.put_ingestion_job(tenant_id, job)
 
     except Exception as ex:
         job["status"] = failure_status

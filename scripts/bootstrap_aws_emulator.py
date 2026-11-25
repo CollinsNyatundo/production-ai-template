@@ -52,19 +52,26 @@ def bootstrap_aws_resources(
                 Bucket=bucket,
                 CreateBucketConfiguration={"LocationConstraint": client_factory.region_name},
             )
+    # Merge a staging expiration rule strictly longer than SQS max 14-day retention
+    # while preserving any pre-existing bucket lifecycle rules.
+    staging_rule = {
+        "ID": "expire-abandoned-staging-uploads",
+        "Filter": {"Prefix": "staging/"},
+        "Status": "Enabled",
+        "Expiration": {"Days": 15},
+    }
     try:
+        existing_rules: list[dict[str, object]] = []
+        try:
+            current_lc = s3.get_bucket_lifecycle_configuration(Bucket=bucket)
+            raw_rules = current_lc.get("Rules", [])
+            if isinstance(raw_rules, list):
+                existing_rules = [r for r in raw_rules if isinstance(r, dict) and r.get("ID") != staging_rule["ID"]]
+        except ClientError:
+            existing_rules = []
         s3.put_bucket_lifecycle_configuration(
             Bucket=bucket,
-            LifecycleConfiguration={
-                "Rules": [
-                    {
-                        "ID": "expire-abandoned-staging-uploads",
-                        "Filter": {"Prefix": "staging/"},
-                        "Status": "Enabled",
-                        "Expiration": {"Days": 1},
-                    }
-                ]
-            },
+            LifecycleConfiguration={"Rules": [*existing_rules, staging_rule]},
         )
     except ClientError:
         pass

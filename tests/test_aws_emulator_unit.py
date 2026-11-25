@@ -350,6 +350,16 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
     sqs.delete_message.assert_not_called()
     s3.delete_objects.assert_called_once()
 
+    # When RedrivePolicy cannot be read (returns None), worker MUST NOT cache a guessed limit
+    # or prematurely delete staged uploads on attempt 3.
+    s3.delete_objects.reset_mock()
+    sqs.get_queue_attributes.side_effect = _client_error("AccessDenied")
+    unknown_policy_worker = SQSIngestionWorker(queue=queue, vector_store=store)
+    assert await unknown_policy_worker.process_message(final_msg) is False
+    assert INGESTION_JOBS["job-fail"]["status"] == "retrying"
+    s3.delete_objects.assert_not_called()
+    sqs.get_queue_attributes.side_effect = None
+
 
 @pytest.mark.asyncio
 async def test_load_staged_text_follows_object_kms_metadata_across_config_changes() -> None:
@@ -595,11 +605,20 @@ async def test_sqs_and_dynamodb_repositories() -> None:
     ddb.update_item.side_effect = None
 
     col_payload = {"id": "col-j1", "tenant_id": "tenant-a", "name": "kb"}
+    col_payload_2 = {"id": "col-j2", "tenant_id": "tenant-a", "name": "kb-2"}
     await repo.put_collection("tenant-a", col_payload)
     ddb.get_item.return_value = {"Item": {"payload": {"S": json.dumps(col_payload)}}}
     assert (await repo.get_collection("tenant-a", "col-j1")) == col_payload
-    ddb.query.return_value = {"Items": [{"payload": {"S": json.dumps(col_payload)}}]}
-    assert (await repo.list_collections("tenant-a")) == [col_payload]
+    # Verify multi-page LastEvaluatedKey pagination collects all pages
+    ddb.query.side_effect = [
+        {
+            "Items": [{"payload": {"S": json.dumps(col_payload)}}],
+            "LastEvaluatedKey": {"tenant_id": {"S": "tenant-a"}, "item_key": {"S": "COLLECTION#col-j1"}},
+        },
+        {"Items": [{"payload": {"S": json.dumps(col_payload_2)}}]},
+    ]
+    assert (await repo.list_collections("tenant-a")) == [col_payload, col_payload_2]
+    ddb.query.side_effect = None
     ddb.delete_item.return_value = {"Attributes": {"collection_id": {"S": "col-j1"}}}
     assert await repo.delete_collection("tenant-a", "col-j1") is True
 
@@ -764,6 +783,9 @@ async def test_observability_sink_emits_and_detects_unprocessed_xray_segments() 
 def test_bootstrap_passes_location_constraint_outside_us_east_1() -> None:
     s3 = MagicMock()
     s3.head_bucket.side_effect = _client_error("404")
+    s3.get_bucket_lifecycle_configuration.return_value = {
+        "Rules": [{"ID": "existing-archive-rule", "Filter": {"Prefix": "tenants/"}, "Status": "Enabled"}]
+    }
     s3v = MagicMock()
     kms = MagicMock()
     kms.list_aliases.return_value = {"Aliases": [{"AliasName": "alias/q-tenant-key", "TargetKeyId": "key-eu"}]}
@@ -793,3 +815,9 @@ def test_bootstrap_passes_location_constraint_outside_us_east_1() -> None:
         Bucket="eu-bucket",
         CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
     )
+    lc_rules = s3.put_bucket_lifecycle_configuration.call_args.kwargs["LifecycleConfiguration"]["Rules"]
+    rule_ids = [r["ID"] for r in lc_rules]
+    assert "existing-archive-rule" in rule_ids
+    assert "expire-abandoned-staging-uploads" in rule_ids
+    staging_rule = next(r for r in lc_rules if r["ID"] == "expire-abandoned-staging-uploads")
+    assert staging_rule["Expiration"]["Days"] == 15

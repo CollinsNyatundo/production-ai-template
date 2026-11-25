@@ -83,8 +83,9 @@ class RAGPipeline:
 
             # 2. Semantic Cache Check
             cache_tenant = payload.tenant_id or "default-tenant"
-            cache_generation = await semantic_cache.get_tenant_generation_async(cache_tenant)
+            cache_generation: int | None = None
             if payload.use_cache:
+                cache_generation = await semantic_cache.get_tenant_generation_async(cache_tenant)
                 cached_response = await semantic_cache.get(cache_tenant, payload.query)
                 if cached_response:
                     span.set_attribute("cache_hit", True)
