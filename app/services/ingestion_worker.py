@@ -55,25 +55,44 @@ class SQSIngestionWorker:
         self._lease_seconds = max(10, lease_seconds)
         self._default_max_receive_count = max(1, default_max_receive_count)
         self._worker_id = f"worker-{uuid.uuid4().hex[:8]}"
+        self._last_known_max_receive: Optional[int] = None
 
     def _use_shared_state(self) -> bool:
         return bool(settings.aws_backend_enabled and settings.aws_dynamodb_table)
+
+    async def _require_readable_redrive_policy(self) -> int:
+        """Ensure queue RedrivePolicy is readable before polling SQS for work."""
+        max_receive_count = await self._queue.get_max_receive_count()
+        if max_receive_count is None:
+            raise RuntimeError(
+                "SQS queue RedrivePolicy is missing or unreadable; refusing to poll ingestion jobs "
+                "until queue attributes and sqs:GetQueueAttributes permission are configured."
+            )
+        self._last_known_max_receive = max_receive_count
+        return max_receive_count
 
     async def _classify_failure(self, receive_count: int) -> Tuple[str, bool, Optional[int]]:
         """Refresh queue RedrivePolicy on failure so live queue repairs take effect immediately.
 
         Returns ``(failure_status, should_cleanup_staging, max_receive_count)``:
-        - Policy unreadable (``None``): ``("retry_pending", False, None)`` so clients keep
-          bounded tracking while preserving the staged upload in case SQS redelivers.
-        - Retries remaining: ``("retrying", False, max_receive_count)``.
-        - Terminal attempt: ``("failed", True, max_receive_count)``.
+        - Freshly read policy: classifies ``retrying`` vs ``failed`` and allows staging cleanup
+          only on the confirmed terminal attempt (handles live policy changes in both directions).
+        - Transiently unreadable policy: never deletes staged uploads prematurely (S3 lifecycle
+          expires abandoned uploads after 15 days); uses the last verified policy limit (when
+          available) so terminal attempts still transition out of ``retrying`` into ``failed``.
         """
-        max_receive_count = await self._queue.get_max_receive_count()
-        if max_receive_count is None:
-            return "retry_pending", False, None
-        if receive_count < max_receive_count:
-            return "retrying", False, max_receive_count
-        return "failed", True, max_receive_count
+        live_max = await self._queue.get_max_receive_count()
+        if live_max is not None:
+            self._last_known_max_receive = live_max
+            if receive_count < live_max:
+                return "retrying", False, live_max
+            return "failed", True, live_max
+        fallback_max = self._last_known_max_receive
+        if fallback_max is not None:
+            if receive_count < fallback_max:
+                return "retrying", False, fallback_max
+            return "failed", False, fallback_max
+        return "failed", False, None
 
     async def _handle_attempt_failure(
         self,
@@ -194,6 +213,7 @@ class SQSIngestionWorker:
         heartbeat_task = asyncio.create_task(
             self._lease_heartbeat(tenant_id, job_id, message.receipt_handle, done_event)
         )
+        completed_successfully = False
         try:
             content_override: Optional[str] = None
             if staging_s3_key:
@@ -216,10 +236,7 @@ class SQSIngestionWorker:
                     error_detail,
                 )
                 return False
-
-            await self._queue.acknowledge(message.receipt_handle)
-            await self._cleanup_staging_best_effort(staging_s3_key)
-            return True
+            completed_successfully = True
         except Exception as exc:
             logger.error("Ingestion attempt error for job '%s': %s", job_id, exc)
             await self._handle_attempt_failure(
@@ -238,8 +255,26 @@ class SQSIngestionWorker:
             except asyncio.CancelledError:
                 pass
 
+        if completed_successfully:
+            # Handle SQS acknowledgement errors separately so a DeleteMessage failure NEVER
+            # overwrites durable "completed" state; redelivery will deduplicate cleanly.
+            try:
+                await self._queue.acknowledge(message.receipt_handle)
+            except Exception as ack_exc:
+                logger.warning(
+                    "Job '%s' completed durably but SQS acknowledge failed (%s); "
+                    "redelivery will deduplicate without re-indexing.",
+                    job_id,
+                    ack_exc,
+                )
+                return False
+            await self._cleanup_staging_best_effort(staging_s3_key)
+            return True
+        return False
+
     async def process_once(self, max_messages: int = 1, wait_seconds: int = 1) -> int:
         """Poll SQS once (default 1 message to avoid visibility starvation) and process received jobs."""
+        await self._require_readable_redrive_policy()
         messages = await self._queue.receive_jobs(max_messages=max_messages, wait_seconds=wait_seconds)
         completed = 0
         for msg in messages:

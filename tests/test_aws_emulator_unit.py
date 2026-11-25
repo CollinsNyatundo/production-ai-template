@@ -246,12 +246,27 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
     from app.services.ingestion_worker import SQSIngestionWorker
 
     monkeypatch.setattr(settings, "aws_backend_enabled", False)
-    s3 = MagicMock()
-    s3.get_object.return_value = {
-        "Body": MagicMock(read=lambda: b"Staged paragraph content exceeding twenty chars."),
-        "Metadata": {"kms_encrypted": "false"},
+    staged_objects: dict[str, bytes] = {
+        "staging/tenant-a/job-ok.txt": b"Staged paragraph content exceeding twenty chars.",
+        "staging/tenant-a/job-ack-err.txt": b"Staged paragraph content exceeding twenty chars.",
+        "staging/tenant-a/job-fail.txt": b"Staged paragraph content exceeding twenty chars.",
+        "staging/tenant-a/job-fail-up.txt": b"Staged paragraph content exceeding twenty chars.",
     }
-    s3.delete_objects.return_value = {}
+    s3 = MagicMock()
+
+    def _s3_get_object(Bucket: str, Key: str) -> dict[str, object]:
+        if Key not in staged_objects:
+            raise _client_error("NoSuchKey")
+        payload = staged_objects[Key]
+        return {"Body": MagicMock(read=lambda p=payload: p), "Metadata": {"kms_encrypted": "false"}}
+
+    def _s3_delete_objects(Bucket: str, Delete: dict[str, list[dict[str, str]]]) -> dict[str, object]:
+        for obj in Delete.get("Objects", []):
+            staged_objects.pop(str(obj["Key"]), None)
+        return {}
+
+    s3.get_object.side_effect = _s3_get_object
+    s3.delete_objects.side_effect = _s3_delete_objects
     s3v = MagicMock()
     sqs = MagicMock()
     sqs.get_queue_attributes.return_value = {
@@ -306,6 +321,38 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
     assert call_count == 1
     sqs.delete_message.assert_called_once()
 
+    # SQS acknowledgement error after durable completion MUST NOT overwrite "completed" state;
+    # redelivery deduplicates without re-indexing and succeeds on ack retry.
+    sqs.delete_message.reset_mock()
+    sqs.delete_message.side_effect = [_client_error("AccessDenied"), None]
+    ack_err_msg = QueuedMessage(
+        message_id="m-ack-err",
+        receipt_handle="rh-ack-err-1",
+        body={
+            "job_id": "job-ack-err",
+            "tenant_id": "tenant-a",
+            "source_type": "file",
+            "uri": "ack.txt",
+            "collection_name": "ack-kb",
+            "staging_s3_key": "staging/tenant-a/job-ack-err.txt",
+        },
+        receive_count=1,
+    )
+    assert await worker.process_message(ack_err_msg) is False
+    assert INGESTION_JOBS["job-ack-err"]["status"] == "completed"
+    assert call_count == 2
+    assert "staging/tenant-a/job-ack-err.txt" in staged_objects
+    ack_retry_msg = QueuedMessage(
+        message_id="m-ack-err",
+        receipt_handle="rh-ack-err-2",
+        body=ack_err_msg.body,
+        receive_count=2,
+    )
+    assert await worker.process_message(ack_retry_msg) is True
+    assert call_count == 2  # Deduplicated without re-indexing!
+    assert "staging/tenant-a/job-ack-err.txt" not in staged_objects
+    sqs.delete_message.side_effect = None
+
     # Non-terminal failure (receive_count=1 < 3) records "retrying" and preserves staging object
     sqs.delete_message.reset_mock()
     s3.delete_objects.reset_mock()
@@ -339,8 +386,8 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
     )
     assert await worker.process_message(retry_msg) is False
     assert INGESTION_JOBS["job-fail"]["status"] == "retrying"
+    assert "staging/tenant-a/job-fail.txt" in staged_objects
     sqs.delete_message.assert_not_called()
-    s3.delete_objects.assert_not_called()
 
     # Live queue policy reconciliation DOWN (3 -> 2) on the SAME running worker:
     # attempt 2 is now terminal -> marks "failed" and deletes staged upload.
@@ -355,67 +402,49 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
     )
     assert await worker.process_message(second_msg) is False
     assert INGESTION_JOBS["job-fail"]["status"] == "failed"
+    assert "staging/tenant-a/job-fail.txt" not in staged_objects
     sqs.delete_message.assert_not_called()
-    s3.delete_objects.assert_called_once()
 
-    # Live queue policy reconciliation UP (2 -> 3) on the SAME running worker:
-    # attempt 2 is now non-terminal -> marks "retrying" and preserves staged upload.
-    s3.delete_objects.reset_mock()
+    # Live queue policy reconciliation UP (2 -> 3) on the SAME running worker using a fresh job
+    # whose staging file genuinely exists: attempt 2 preserves staging and attempt 3 succeeds!
     sqs.get_queue_attributes.return_value = {
         "Attributes": {"RedrivePolicy": json.dumps({"deadLetterTargetArn": "arn:dlq", "maxReceiveCount": "3"})}
     }
-    assert await worker.process_message(second_msg) is False
-    assert INGESTION_JOBS["job-fail"]["status"] == "retrying"
-    s3.delete_objects.assert_not_called()
-
-    # Terminal failure (receive_count=3 >= 3) marks "failed" and cleans up abandoned staging object
-    final_msg = QueuedMessage(
-        message_id="m-fail-3",
-        receipt_handle="rh-fail-3",
-        body=retry_msg.body,
-        receive_count=3,
-    )
-    assert await worker.process_message(final_msg) is False
-    assert INGESTION_JOBS["job-fail"]["status"] == "failed"
-    sqs.delete_message.assert_not_called()
-    s3.delete_objects.assert_called_once()
-
-    # When RedrivePolicy cannot be read (returns None), worker records distinct "retry_pending"
-    # (so clients keep bounded tracking) and preserves staging; a subsequent redelivery succeeds.
-    s3.delete_objects.reset_mock()
-    sqs.delete_message.reset_mock()
-    sqs.get_queue_attributes.side_effect = _client_error("AccessDenied")
-    unknown_msg_1 = QueuedMessage(
-        message_id="m-unk-1",
-        receipt_handle="rh-unk-1",
+    up_msg_2 = QueuedMessage(
+        message_id="m-up-2",
+        receipt_handle="rh-up-2",
         body={
-            "job_id": "job-unk",
+            "job_id": "job-fail-up",
             "tenant_id": "tenant-a",
             "source_type": "file",
-            "uri": "unk.txt",
-            "collection_name": "unk-kb",
-            "staging_s3_key": "staging/tenant-a/job-unk.txt",
+            "uri": "up.txt",
+            "collection_name": "up-kb",
+            "staging_s3_key": "staging/tenant-a/job-fail-up.txt",
         },
-        receive_count=1,
-    )
-    assert await worker.process_message(unknown_msg_1) is False
-    assert INGESTION_JOBS["job-unk"]["status"] == "retry_pending"
-    assert isinstance(INGESTION_JOBS["job-unk"].get("updated_at"), float)
-    s3.delete_objects.assert_not_called()
-    sqs.delete_message.assert_not_called()
-
-    # Second delivery succeeds even while RedrivePolicy remains unreadable
-    monkeypatch.setattr("app.services.ingestion_worker.process_ingestion_job", _complete_job)
-    unknown_msg_2 = QueuedMessage(
-        message_id="m-unk-2",
-        receipt_handle="rh-unk-2",
-        body=unknown_msg_1.body,
         receive_count=2,
     )
-    assert await worker.process_message(unknown_msg_2) is True
-    assert INGESTION_JOBS["job-unk"]["status"] == "completed"
-    sqs.delete_message.assert_called_once()
-    s3.delete_objects.assert_called_once()
+    assert await worker.process_message(up_msg_2) is False
+    assert INGESTION_JOBS["job-fail-up"]["status"] == "retrying"
+    assert "staging/tenant-a/job-fail-up.txt" in staged_objects
+
+    # Attempt 3 loads the preserved staged file and completes cleanly
+    monkeypatch.setattr("app.services.ingestion_worker.process_ingestion_job", _complete_job)
+    up_msg_3 = QueuedMessage(
+        message_id="m-up-3",
+        receipt_handle="rh-up-3",
+        body=up_msg_2.body,
+        receive_count=3,
+    )
+    assert await worker.process_message(up_msg_3) is True
+    assert INGESTION_JOBS["job-fail-up"]["status"] == "completed"
+    assert "staging/tenant-a/job-fail-up.txt" not in staged_objects
+
+    # Worker refuses to poll SQS when RedrivePolicy is unreadable (no messages dequeued)
+    sqs.receive_message.reset_mock()
+    sqs.get_queue_attributes.side_effect = _client_error("AccessDenied")
+    with pytest.raises(RuntimeError, match="RedrivePolicy is missing or unreadable"):
+        await worker.process_once()
+    sqs.receive_message.assert_not_called()
     sqs.get_queue_attributes.side_effect = None
 
 
