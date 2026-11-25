@@ -35,6 +35,18 @@ def _require_scope(user: User, scope: str) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Missing required scope: {scope}")
 
 
+async def _ensure_aws_ingestion_ready() -> None:
+    """Verify SQS RedrivePolicy is readable BEFORE creating jobs or staging uploads."""
+    if not (settings.aws_backend_enabled and settings.aws_sqs_queue_url):
+        return
+    max_receive = await sqs_ingestion_queue.get_max_receive_count()
+    if max_receive is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingestion queue RedrivePolicy is missing or unreadable; retry later.",
+        )
+
+
 # ── Endpoint 1: JSON body for web / github / sql sources ──────────────────────
 @router.post("/ingest")
 async def start_ingestion(
@@ -46,6 +58,7 @@ async def start_ingestion(
     st_type = payload.source_type
     uri = payload.uri
     _require_scope(current_user, "write")
+    await _ensure_aws_ingestion_ready()
     t_id = current_user.tenant_id
     c_name = payload.collection_name or f"{st_type}-{uri.split('/')[-1]}"
 
@@ -95,6 +108,7 @@ async def start_file_ingestion(
 ):
     """Accept a multipart upload and ingest the file contents."""
     _require_scope(current_user, "write")
+    await _ensure_aws_ingestion_ready()
     uri = file.filename or "unknown-file"
     c_name = collection_name or f"file-{uri}"
     file_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)

@@ -213,7 +213,6 @@ class SQSIngestionWorker:
         heartbeat_task = asyncio.create_task(
             self._lease_heartbeat(tenant_id, job_id, message.receipt_handle, done_event)
         )
-        completed_successfully = False
         try:
             content_override: Optional[str] = None
             if staging_s3_key:
@@ -236,7 +235,21 @@ class SQSIngestionWorker:
                     error_detail,
                 )
                 return False
-            completed_successfully = True
+
+            # Acknowledge while heartbeat is still active so a slow SQS delete cannot expire
+            # visibility; handle ack errors separately so durable "completed" state is never overwritten.
+            try:
+                await self._queue.acknowledge(message.receipt_handle)
+            except Exception as ack_exc:
+                logger.warning(
+                    "Job '%s' completed durably but SQS acknowledge failed (%s); "
+                    "redelivery will deduplicate without re-indexing.",
+                    job_id,
+                    ack_exc,
+                )
+                return False
+            await self._cleanup_staging_best_effort(staging_s3_key)
+            return True
         except Exception as exc:
             logger.error("Ingestion attempt error for job '%s': %s", job_id, exc)
             await self._handle_attempt_failure(
@@ -254,23 +267,6 @@ class SQSIngestionWorker:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
-
-        if completed_successfully:
-            # Handle SQS acknowledgement errors separately so a DeleteMessage failure NEVER
-            # overwrites durable "completed" state; redelivery will deduplicate cleanly.
-            try:
-                await self._queue.acknowledge(message.receipt_handle)
-            except Exception as ack_exc:
-                logger.warning(
-                    "Job '%s' completed durably but SQS acknowledge failed (%s); "
-                    "redelivery will deduplicate without re-indexing.",
-                    job_id,
-                    ack_exc,
-                )
-                return False
-            await self._cleanup_staging_best_effort(staging_s3_key)
-            return True
-        return False
 
     async def process_once(self, max_messages: int = 1, wait_seconds: int = 1) -> int:
         """Poll SQS once (default 1 message to avoid visibility starvation) and process received jobs."""

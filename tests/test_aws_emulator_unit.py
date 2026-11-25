@@ -449,6 +449,54 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
 
 
 @pytest.mark.asyncio
+async def test_ingest_routes_return_503_when_sqs_redrive_policy_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from io import BytesIO
+
+    from fastapi import BackgroundTasks, HTTPException, UploadFile
+
+    from app.api.ingest import IngestRequest, start_file_ingestion, start_ingestion
+    from app.security.auth import User
+    from app.services.ingestion_service import INGESTION_JOBS
+
+    monkeypatch.setattr(settings, "aws_backend_enabled", True)
+    monkeypatch.setattr(settings, "aws_sqs_queue_url", "https://127.0.0.1:9297/0/q")
+
+    async def _unreadable_policy() -> int | None:
+        return None
+
+    stage_mock = MagicMock()
+    monkeypatch.setattr("app.api.ingest.sqs_ingestion_queue.get_max_receive_count", _unreadable_policy)
+    monkeypatch.setattr("app.api.ingest.S3VectorKnowledgeStore", stage_mock)
+
+    user = User(username="u1", tenant_id="tenant-unready", scopes=["read", "write"])
+    before_jobs = set(INGESTION_JOBS.keys())
+
+    with pytest.raises(HTTPException) as exc_web:
+        await start_ingestion(
+            BackgroundTasks(),
+            IngestRequest(source_type="web", uri="https://example.com/doc"),
+            current_user=user,
+        )
+    assert exc_web.value.status_code == 503
+
+    upload = UploadFile(filename="doc.txt", file=BytesIO(b"hello world content"))
+    with pytest.raises(HTTPException) as exc_file:
+        await start_file_ingestion(
+            BackgroundTasks(),
+            file=upload,
+            collection_name="col-unready",
+            current_user=user,
+        )
+    assert exc_file.value.status_code == 503
+
+    # Neither route created a job or touched S3 staging
+    assert set(INGESTION_JOBS.keys()) == before_jobs
+    stage_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_load_staged_text_follows_object_kms_metadata_across_config_changes() -> None:
     dek = os.urandom(32)
     kms = MagicMock()
