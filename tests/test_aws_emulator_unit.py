@@ -350,13 +350,13 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
     sqs.delete_message.assert_not_called()
     s3.delete_objects.assert_called_once()
 
-    # When RedrivePolicy cannot be read (returns None), worker MUST NOT cache a guessed limit
-    # or prematurely delete staged uploads on attempt 3.
+    # When RedrivePolicy cannot be read (returns None), worker marks "failed" so clients
+    # never hang forever in "retrying", while still preserving the staged upload for SQS retries.
     s3.delete_objects.reset_mock()
     sqs.get_queue_attributes.side_effect = _client_error("AccessDenied")
     unknown_policy_worker = SQSIngestionWorker(queue=queue, vector_store=store)
     assert await unknown_policy_worker.process_message(final_msg) is False
-    assert INGESTION_JOBS["job-fail"]["status"] == "retrying"
+    assert INGESTION_JOBS["job-fail"]["status"] == "failed"
     s3.delete_objects.assert_not_called()
     sqs.get_queue_attributes.side_effect = None
 
@@ -821,3 +821,13 @@ def test_bootstrap_passes_location_constraint_outside_us_east_1() -> None:
     assert "expire-abandoned-staging-uploads" in rule_ids
     staging_rule = next(r for r in lc_rules if r["ID"] == "expire-abandoned-staging-uploads")
     assert staging_rule["Expiration"]["Days"] == 15
+
+    # If lifecycle read fails with AccessDenied, bootstrap MUST NOT overwrite existing lifecycle rules;
+    # and if CreateQueue hits QueueAlreadyExists (attribute drift), it reconciles via set_queue_attributes.
+    s3.put_bucket_lifecycle_configuration.reset_mock()
+    s3.get_bucket_lifecycle_configuration.side_effect = _client_error("AccessDenied")
+    sqs.create_queue.side_effect = [{"QueueUrl": "https://sqs/dlq"}, _client_error("QueueAlreadyExists")]
+    sqs.get_queue_url.return_value = {"QueueUrl": "https://sqs/main"}
+    bootstrap_aws_resources(factory=factory, s3_bucket="eu-bucket", queue_prefix="q")
+    s3.put_bucket_lifecycle_configuration.assert_not_called()
+    sqs.set_queue_attributes.assert_called_once()

@@ -62,17 +62,24 @@ def bootstrap_aws_resources(
     }
     try:
         existing_rules: list[dict[str, object]] = []
+        can_update_lifecycle = True
         try:
             current_lc = s3.get_bucket_lifecycle_configuration(Bucket=bucket)
             raw_rules = current_lc.get("Rules", [])
             if isinstance(raw_rules, list):
                 existing_rules = [r for r in raw_rules if isinstance(r, dict) and r.get("ID") != staging_rule["ID"]]
-        except ClientError:
-            existing_rules = []
-        s3.put_bucket_lifecycle_configuration(
-            Bucket=bucket,
-            LifecycleConfiguration={"Rules": [*existing_rules, staging_rule]},
-        )
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in {"NoSuchLifecycleConfiguration", "NoSuchLifecycle", "404"}:
+                existing_rules = []
+            else:
+                # Never overwrite existing bucket lifecycle rules if we could not read them
+                can_update_lifecycle = False
+        if can_update_lifecycle:
+            s3.put_bucket_lifecycle_configuration(
+                Bucket=bucket,
+                LifecycleConfiguration={"Rules": [*existing_rules, staging_rule]},
+            )
     except ClientError:
         pass
 
@@ -127,15 +134,18 @@ def bootstrap_aws_resources(
     sqs = client_factory.get_client("sqs")
     dlq_url = str(sqs.create_queue(QueueName=f"{queue_prefix}-dlq")["QueueUrl"])
     dlq_arn = str(sqs.get_queue_attributes(QueueUrl=dlq_url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"])
-    main_url = str(
-        sqs.create_queue(
-            QueueName=queue_prefix,
-            Attributes={
-                "VisibilityTimeout": "30",
-                "RedrivePolicy": json.dumps({"deadLetterTargetArn": dlq_arn, "maxReceiveCount": "3"}),
-            },
-        )["QueueUrl"]
-    )
+    desired_queue_attrs = {
+        "VisibilityTimeout": "30",
+        "RedrivePolicy": json.dumps({"deadLetterTargetArn": dlq_arn, "maxReceiveCount": "3"}),
+    }
+    try:
+        main_url = str(sqs.create_queue(QueueName=queue_prefix, Attributes=desired_queue_attrs)["QueueUrl"])
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if "QueueAlreadyExists" not in code and "QueueNameExists" not in code:
+            raise
+        main_url = str(sqs.get_queue_url(QueueName=queue_prefix)["QueueUrl"])
+        sqs.set_queue_attributes(QueueUrl=main_url, Attributes=desired_queue_attrs)
 
     # 6. DynamoDB multi-tenant state table (honor real AWS CREATING -> ACTIVE lifecycle)
     ddb = client_factory.get_client("dynamodb")

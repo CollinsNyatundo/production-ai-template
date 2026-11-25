@@ -154,10 +154,13 @@ class SQSIngestionWorker:
         INGESTION_JOBS[job_id] = seed_job
 
         max_receive_count = await self._get_max_receive_count()
-        # Only treat an attempt as terminal when the queue's RedrivePolicy was actually read.
-        # If unreadable, preserve staged objects and mark "retrying" so retries never lose uploads.
-        is_final_attempt = max_receive_count is not None and message.receive_count >= max_receive_count
-        failure_status = "failed" if is_final_attempt else "retrying"
+        # Only delete staged objects when RedrivePolicy confirms this is the final attempt.
+        # If RedrivePolicy is absent or unreadable, mark "failed" (so clients never hang in
+        # "retrying" after delivery ends) while preserving the staged upload in case SQS retries.
+        should_cleanup_staging = max_receive_count is not None and message.receive_count >= max_receive_count
+        failure_status = (
+            "retrying" if (max_receive_count is not None and message.receive_count < max_receive_count) else "failed"
+        )
 
         done_event = asyncio.Event()
         heartbeat_task = asyncio.create_task(
@@ -174,7 +177,7 @@ class SQSIngestionWorker:
                     INGESTION_JOBS[job_id]["error"] = str(exc)
                     if self._use_shared_state():
                         await self._state_repo.put_ingestion_job(tenant_id, INGESTION_JOBS[job_id])
-                    if is_final_attempt:
+                    if should_cleanup_staging:
                         await self._cleanup_staging_best_effort(staging_s3_key)
                     return False
 
@@ -193,7 +196,7 @@ class SQSIngestionWorker:
                     message.receive_count,
                     max_receive_count if max_receive_count is not None else "unknown",
                 )
-                if is_final_attempt:
+                if should_cleanup_staging:
                     await self._cleanup_staging_best_effort(staging_s3_key)
                 return False
 
