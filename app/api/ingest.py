@@ -4,17 +4,18 @@ from typing import Literal, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
-from app.cloud.queue_store import sqs_ingestion_queue
+from app.cloud.queue_store import dynamodb_state_repo, sqs_ingestion_queue
 from app.cloud.secrets import kms_envelope_cipher
 from app.cloud.vector_store import S3VectorKnowledgeStore
 from app.config import settings
 from app.security.auth import User, get_current_user
 from app.services.connectors.file_extractor import extract_file_content
 from app.services.ingestion_service import (
-    create_ingestion_job,
+    INGESTION_JOBS,
+    create_ingestion_job_async,
     delete_collection_async,
-    get_job_status,
-    list_collections,
+    get_job_status_async,
+    list_collections_async,
     process_ingestion_job,
 )
 
@@ -48,7 +49,7 @@ async def start_ingestion(
     t_id = current_user.tenant_id
     c_name = payload.collection_name or f"{st_type}-{uri.split('/')[-1]}"
 
-    job_id = create_ingestion_job(st_type, uri, t_id, c_name)
+    job_id = await create_ingestion_job_async(st_type, uri, t_id, c_name)
     if settings.aws_backend_enabled and settings.aws_sqs_queue_url:
         try:
             await sqs_ingestion_queue.enqueue_job(
@@ -62,6 +63,14 @@ async def start_ingestion(
             )
         except Exception as exc:
             logger.error("Failed to enqueue SQS ingestion job '%s': %s", job_id, exc)
+            if job_id in INGESTION_JOBS:
+                INGESTION_JOBS[job_id]["status"] = "failed"
+                INGESTION_JOBS[job_id]["error"] = str(exc)
+                if settings.aws_dynamodb_table:
+                    try:
+                        await dynamodb_state_repo.put_ingestion_job(t_id, INGESTION_JOBS[job_id])
+                    except Exception:
+                        pass
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Ingestion queue unavailable.",
@@ -96,10 +105,11 @@ async def start_file_ingestion(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
 
-    job_id = create_ingestion_job("file", uri, current_user.tenant_id, c_name)
+    job_id = await create_ingestion_job_async("file", uri, current_user.tenant_id, c_name)
     if settings.aws_backend_enabled and settings.aws_sqs_queue_url:
+        vector_store = S3VectorKnowledgeStore(kms_cipher=kms_envelope_cipher)
+        staging_key: Optional[str] = None
         try:
-            vector_store = S3VectorKnowledgeStore(kms_cipher=kms_envelope_cipher)
             staging_key = await vector_store.stage_ingestion_text(current_user.tenant_id, job_id, content_override)
             await sqs_ingestion_queue.enqueue_job(
                 {
@@ -113,6 +123,19 @@ async def start_file_ingestion(
             )
         except Exception as exc:
             logger.error("Failed to stage/enqueue SQS file job '%s': %s", job_id, exc)
+            if staging_key:
+                try:
+                    await vector_store.delete_staged_text(staging_key)
+                except Exception as cleanup_exc:
+                    logger.warning("Failed to clean up abandoned staging object '%s': %s", staging_key, cleanup_exc)
+            if job_id in INGESTION_JOBS:
+                INGESTION_JOBS[job_id]["status"] = "failed"
+                INGESTION_JOBS[job_id]["error"] = str(exc)
+                if settings.aws_dynamodb_table:
+                    try:
+                        await dynamodb_state_repo.put_ingestion_job(current_user.tenant_id, INGESTION_JOBS[job_id])
+                    except Exception:
+                        pass
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Ingestion queue unavailable.",
@@ -129,7 +152,7 @@ async def start_file_ingestion(
 
 @router.get("/ingest/status/{job_id}")
 async def check_ingestion_status(job_id: str, current_user: User = Depends(get_current_user)):
-    job = get_job_status(job_id, current_user.tenant_id)
+    job = await get_job_status_async(job_id, current_user.tenant_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
     return job
@@ -139,7 +162,7 @@ async def check_ingestion_status(job_id: str, current_user: User = Depends(get_c
 async def get_collections(current_user: User = Depends(get_current_user)):
     return {
         "tenant_id": current_user.tenant_id,
-        "collections": list_collections(current_user.tenant_id),
+        "collections": await list_collections_async(current_user.tenant_id),
     }
 
 

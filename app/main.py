@@ -50,9 +50,16 @@ async def lifespan(app: FastAPI):
         if worker_stop is not None:
             worker_stop.set()
         if worker_task is not None:
-            worker_task.cancel()
             try:
-                await worker_task
+                # Allow any in-flight SQS job to finish cleanly before forcing cancellation
+                await asyncio.wait_for(worker_task, timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning("SQS ingestion worker drain timed out; cancelling in-flight task.")
+                worker_task.cancel()
+                try:
+                    await worker_task
+                except asyncio.CancelledError:
+                    pass
             except asyncio.CancelledError:
                 pass
         logger.info("Shutting down application services...")

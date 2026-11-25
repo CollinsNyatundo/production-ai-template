@@ -196,6 +196,7 @@ async def test_s3_delete_objects_partial_errors_preserve_collection_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.services.ingestion_service import ACTIVE_COLLECTIONS, delete_collection_async
+    from app.services.semantic_cache import semantic_cache
 
     s3 = MagicMock()
     s3.list_objects_v2.return_value = {
@@ -220,31 +221,42 @@ async def test_s3_delete_objects_partial_errors_preserve_collection_metadata(
     with pytest.raises(RuntimeError, match="AccessDenied"):
         await store.delete_collection_chunks("tenant-a", "col-err")
 
-    # Verify delete_collection_async propagates the error and keeps ACTIVE_COLLECTIONS intact
+    # Verify delete_collection_async propagates the error, keeps ACTIVE_COLLECTIONS intact,
+    # AND still invalidates cached answers because vectors were already removed.
     monkeypatch.setattr(settings, "aws_backend_enabled", True)
+    monkeypatch.setattr(settings, "aws_dynamodb_table", "")
     monkeypatch.setattr("app.services.ingestion_service.S3VectorKnowledgeStore", lambda **_kw: store)
+    await semantic_cache.set("tenant-a", "err-cache-query", "stale answer", [])
     ACTIVE_COLLECTIONS["col-err"] = {"id": "col-err", "tenant_id": "tenant-a", "chunk_count": 1}
     try:
         with pytest.raises(RuntimeError, match="AccessDenied"):
             await delete_collection_async("col-err", "tenant-a")
         assert "col-err" in ACTIVE_COLLECTIONS
+        assert await semantic_cache.get("tenant-a", "err-cache-query") is None
     finally:
         ACTIVE_COLLECTIONS.pop("col-err", None)
 
 
 @pytest.mark.asyncio
-async def test_sqs_ingestion_worker_acknowledges_success_and_leaves_failures_for_dlq(
+async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.cloud.queue_store import QueuedMessage
     from app.services.ingestion_service import INGESTION_JOBS
     from app.services.ingestion_worker import SQSIngestionWorker
 
+    monkeypatch.setattr(settings, "aws_backend_enabled", False)
     s3 = MagicMock()
-    s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"Staged paragraph content exceeding twenty chars.")}
+    s3.get_object.return_value = {
+        "Body": MagicMock(read=lambda: b"Staged paragraph content exceeding twenty chars."),
+        "Metadata": {"kms_encrypted": "false"},
+    }
     s3.delete_objects.return_value = {}
     s3v = MagicMock()
     sqs = MagicMock()
+    sqs.get_queue_attributes.return_value = {
+        "Attributes": {"RedrivePolicy": json.dumps({"deadLetterTargetArn": "arn:dlq", "maxReceiveCount": "3"})}
+    }
     factory = MagicMock(spec=AWSClientFactory)
     factory.get_client.side_effect = lambda name: {"s3": s3, "s3vectors": s3v, "sqs": sqs}[name]
 
@@ -252,7 +264,17 @@ async def test_sqs_ingestion_worker_acknowledges_success_and_leaves_failures_for
     store = S3VectorKnowledgeStore(factory=factory, bucket_name="docs", vector_bucket_name="vecs", kms_cipher=None)
     worker = SQSIngestionWorker(queue=queue, vector_store=store)
 
-    async def _complete_job(job_id: str, content_override: str | None = None) -> None:
+    call_count = 0
+
+    async def _complete_job(
+        job_id: str,
+        content_override: str | None = None,
+        *,
+        failure_status: str = "failed",
+        reconcile_existing: bool = False,
+    ) -> None:
+        nonlocal call_count
+        call_count += 1
         assert content_override == "Staged paragraph content exceeding twenty chars."
         INGESTION_JOBS[job_id]["status"] = "completed"
 
@@ -266,8 +288,9 @@ async def test_sqs_ingestion_worker_acknowledges_success_and_leaves_failures_for
             "source_type": "file",
             "uri": "doc.txt",
             "collection_name": "doc-kb",
-            "staging_s3_key": "tenants/tenant-a/staging/job-ok.txt",
+            "staging_s3_key": "staging/tenant-a/job-ok.txt",
         },
+        receive_count=1,
     )
     assert await worker.process_message(ok_msg) is True
     sqs.delete_message.assert_called_once_with(
@@ -276,27 +299,131 @@ async def test_sqs_ingestion_worker_acknowledges_success_and_leaves_failures_for
     )
     s3.delete_objects.assert_called_once()
 
-    # Failed job MUST NOT be acknowledged so SQS VisibilityTimeout/DLQ handles retries
+    # Duplicate SQS delivery after completion skips re-indexing and acks immediately
     sqs.delete_message.reset_mock()
+    assert await worker.process_message(ok_msg) is True
+    assert call_count == 1
+    sqs.delete_message.assert_called_once()
 
-    async def _fail_job(job_id: str, content_override: str | None = None) -> None:
-        INGESTION_JOBS[job_id]["status"] = "failed"
+    # Non-terminal failure (receive_count=1 < 3) records "retrying" and preserves staging object
+    sqs.delete_message.reset_mock()
+    s3.delete_objects.reset_mock()
+
+    async def _fail_job(
+        job_id: str,
+        content_override: str | None = None,
+        *,
+        failure_status: str = "failed",
+        reconcile_existing: bool = False,
+    ) -> None:
+        INGESTION_JOBS[job_id]["status"] = failure_status
         INGESTION_JOBS[job_id]["error"] = "simulated indexing error"
 
     monkeypatch.setattr("app.services.ingestion_worker.process_ingestion_job", _fail_job)
-    fail_msg = QueuedMessage(
-        message_id="m-fail",
-        receipt_handle="rh-fail",
+    retry_msg = QueuedMessage(
+        message_id="m-fail-1",
+        receipt_handle="rh-fail-1",
         body={
             "job_id": "job-fail",
             "tenant_id": "tenant-a",
             "source_type": "file",
             "uri": "bad.txt",
             "collection_name": "bad-kb",
+            "staging_s3_key": "staging/tenant-a/job-fail.txt",
         },
+        receive_count=1,
     )
-    assert await worker.process_message(fail_msg) is False
+    assert await worker.process_message(retry_msg) is False
+    assert INGESTION_JOBS["job-fail"]["status"] == "retrying"
     sqs.delete_message.assert_not_called()
+    s3.delete_objects.assert_not_called()
+
+    # Terminal failure (receive_count=3 >= 3) marks "failed" and cleans up abandoned staging object
+    final_msg = QueuedMessage(
+        message_id="m-fail-3",
+        receipt_handle="rh-fail-3",
+        body=retry_msg.body,
+        receive_count=3,
+    )
+    assert await worker.process_message(final_msg) is False
+    assert INGESTION_JOBS["job-fail"]["status"] == "failed"
+    sqs.delete_message.assert_not_called()
+    s3.delete_objects.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_load_staged_text_follows_object_kms_metadata_across_config_changes() -> None:
+    dek = os.urandom(32)
+    kms = MagicMock()
+    kms.generate_data_key.return_value = {"Plaintext": dek, "CiphertextBlob": b"wrapped-dek"}
+    kms.decrypt.return_value = {"Plaintext": dek}
+
+    s3 = MagicMock()
+    factory = MagicMock(spec=AWSClientFactory)
+    factory.get_client.side_effect = lambda name: kms if name == "kms" else s3
+
+    cipher_enabled = KMSEnvelopeCipher(factory=factory, key_id="key-123")
+    cipher_read_only = KMSEnvelopeCipher(factory=factory, key_id="")
+
+    # 1. Plaintext object staged before KMS was enabled MUST NOT be decrypted when KMS is later enabled
+    s3.get_object.return_value = {
+        "Body": MagicMock(read=lambda: b"Plaintext upload staged before KMS."),
+        "Metadata": {"kms_encrypted": "false"},
+    }
+    store_with_kms = S3VectorKnowledgeStore(
+        factory=factory, bucket_name="docs", vector_bucket_name="vecs", kms_cipher=cipher_enabled
+    )
+    assert await store_with_kms.load_staged_text("tenant-a", "staging/tenant-a/j1.txt") == (
+        "Plaintext upload staged before KMS."
+    )
+
+    # 2. Encrypted object staged with KMS MUST still decrypt when consumer has no write key_id
+    encrypted_b64 = await cipher_enabled.encrypt_text("tenant-a", "Encrypted staged payload.")
+    s3.get_object.return_value = {
+        "Body": MagicMock(read=lambda: encrypted_b64.encode("utf-8")),
+        "Metadata": {"kms_encrypted": "true"},
+    }
+    store_read_only = S3VectorKnowledgeStore(
+        factory=factory, bucket_name="docs", vector_bucket_name="vecs", kms_cipher=cipher_read_only
+    )
+    assert await store_read_only.load_staged_text("tenant-a", "staging/tenant-a/j2.txt") == "Encrypted staged payload."
+
+    # 3. Encrypted object MUST fail explicitly when no KMS cipher exists (never index ciphertext)
+    store_no_kms = S3VectorKnowledgeStore(
+        factory=factory, bucket_name="docs", vector_bucket_name="vecs", kms_cipher=None
+    )
+    with pytest.raises(RuntimeError, match="no KMS cipher"):
+        await store_no_kms.load_staged_text("tenant-a", "staging/tenant-a/j2.txt")
+
+
+@pytest.mark.asyncio
+async def test_cross_replica_semantic_cache_invalidation_via_shared_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.semantic_cache import SemanticCache
+
+    shared_gens: dict[str, int] = {}
+
+    async def _fake_get_gen(tenant_id: str) -> int:
+        return shared_gens.get(tenant_id, 0)
+
+    async def _fake_inc_gen(tenant_id: str) -> int:
+        shared_gens[tenant_id] = shared_gens.get(tenant_id, 0) + 1
+        return shared_gens[tenant_id]
+
+    monkeypatch.setattr(settings, "aws_backend_enabled", True)
+    monkeypatch.setattr(settings, "aws_dynamodb_table", "shared-state")
+    monkeypatch.setattr("app.services.semantic_cache.dynamodb_state_repo.get_cache_generation", _fake_get_gen)
+    monkeypatch.setattr("app.services.semantic_cache.dynamodb_state_repo.increment_cache_generation", _fake_inc_gen)
+
+    replica_a = SemanticCache()
+    replica_b = SemanticCache()
+    await replica_a.set("tenant-x", "policy question", "old answer", [])
+    assert (await replica_a.get("tenant-x", "policy question")) is not None
+
+    # Replica B finishes indexing and invalidates the tenant -> Replica A MUST miss immediately
+    await replica_b.invalidate_tenant("tenant-x")
+    assert await replica_a.get("tenant-x", "policy question") is None
 
 
 @pytest.mark.asyncio
@@ -438,6 +565,171 @@ async def test_sqs_and_dynamodb_repositories() -> None:
     assert fb_id.startswith("fb-")
     rows = await repo.list_feedback("tenant-a", "s1")
     assert len(rows) == 1 and rows[0]["rating"] == "thumbs_up"
+
+    # Extended SQS visibility and RedrivePolicy lookup
+    await queue.extend_visibility("rh-1", 45)
+    sqs.change_message_visibility.assert_called_once()
+    sqs.get_queue_attributes.return_value = {"Attributes": {"RedrivePolicy": json.dumps({"maxReceiveCount": "4"})}}
+    assert await queue.get_max_receive_count() == 4
+
+    # DynamoDB shared ingestion jobs, leases, collections, and cache generations
+    job_payload = {"job_id": "j1", "tenant_id": "tenant-a", "status": "processing"}
+    await repo.put_ingestion_job("tenant-a", job_payload, lease_owner="w1", lease_expires_at=9999999999)
+    ddb.get_item.return_value = {"Item": {"payload": {"S": json.dumps(job_payload)}, "status": {"S": "processing"}}}
+    assert (await repo.get_ingestion_job("tenant-a", "j1")) == job_payload
+
+    # Claim returns "acquired", then "completed", then "in_progress" on conditional failure
+    ddb.get_item.return_value = {}
+    assert await repo.claim_ingestion_job("tenant-a", job_payload, "w1", lease_seconds=30) == "acquired"
+    ddb.get_item.return_value = {"Item": {"status": {"S": "completed"}}}
+    assert await repo.claim_ingestion_job("tenant-a", job_payload, "w2", lease_seconds=30) == "completed"
+    ddb.get_item.side_effect = [{}, {"Item": {"status": {"S": "processing"}}}]
+    ddb.put_item.side_effect = _client_error("ConditionalCheckFailedException")
+    assert await repo.claim_ingestion_job("tenant-a", job_payload, "w2", lease_seconds=30) == "in_progress"
+    ddb.get_item.side_effect = None
+    ddb.put_item.side_effect = None
+
+    assert await repo.renew_ingestion_lease("tenant-a", "j1", "w1", lease_seconds=30) is True
+    ddb.update_item.side_effect = _client_error("ConditionalCheckFailedException")
+    assert await repo.renew_ingestion_lease("tenant-a", "j1", "w2", lease_seconds=30) is False
+    ddb.update_item.side_effect = None
+
+    col_payload = {"id": "col-j1", "tenant_id": "tenant-a", "name": "kb"}
+    await repo.put_collection("tenant-a", col_payload)
+    ddb.get_item.return_value = {"Item": {"payload": {"S": json.dumps(col_payload)}}}
+    assert (await repo.get_collection("tenant-a", "col-j1")) == col_payload
+    ddb.query.return_value = {"Items": [{"payload": {"S": json.dumps(col_payload)}}]}
+    assert (await repo.list_collections("tenant-a")) == [col_payload]
+    ddb.delete_item.return_value = {"Attributes": {"collection_id": {"S": "col-j1"}}}
+    assert await repo.delete_collection("tenant-a", "col-j1") is True
+
+    ddb.get_item.return_value = {"Item": {"generation": {"N": "7"}}}
+    assert await repo.get_cache_generation("tenant-a") == 7
+    ddb.update_item.return_value = {"Attributes": {"generation": {"N": "8"}}}
+    assert await repo.increment_cache_generation("tenant-a") == 8
+
+
+@pytest.mark.asyncio
+async def test_ingestion_service_dynamodb_async_lifecycle_and_worker_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from app.cloud.queue_store import QueuedMessage
+    from app.services import ingestion_service as svc
+    from app.services.ingestion_worker import SQSIngestionWorker
+
+    jobs_db: dict[tuple[str, str], dict[str, object]] = {}
+    cols_db: dict[tuple[str, str], dict[str, object]] = {}
+    gen_db: dict[str, int] = {}
+
+    class _FakeRepo:
+        async def put_ingestion_job(self, tenant_id: str, job: dict[str, object], **_kw: object) -> None:
+            jobs_db[(tenant_id, str(job["job_id"]))] = dict(job)
+
+        async def get_ingestion_job(self, tenant_id: str, job_id: str) -> dict[str, object] | None:
+            row = jobs_db.get((tenant_id, job_id))
+            return dict(row) if row is not None else None
+
+        async def claim_ingestion_job(
+            self, tenant_id: str, job: dict[str, object], owner_id: str, lease_seconds: int = 30
+        ) -> str:
+            existing = jobs_db.get((tenant_id, str(job["job_id"])))
+            if existing and existing.get("status") == "completed":
+                return "completed"
+            if existing and existing.get("lease_owner") and existing.get("lease_owner") != owner_id:
+                return "in_progress"
+            copy = dict(job)
+            copy["lease_owner"] = owner_id
+            jobs_db[(tenant_id, str(job["job_id"]))] = copy
+            return "acquired"
+
+        async def renew_ingestion_lease(self, *_args: object, **_kw: object) -> bool:
+            return True
+
+        async def put_collection(self, tenant_id: str, col: dict[str, object]) -> None:
+            cols_db[(tenant_id, str(col["id"]))] = dict(col)
+
+        async def get_collection(self, tenant_id: str, col_id: str) -> dict[str, object] | None:
+            row = cols_db.get((tenant_id, col_id))
+            return dict(row) if row is not None else None
+
+        async def list_collections(self, tenant_id: str) -> list[dict[str, object]]:
+            return [dict(v) for (t, _), v in cols_db.items() if t == tenant_id]
+
+        async def delete_collection(self, tenant_id: str, col_id: str) -> bool:
+            return cols_db.pop((tenant_id, col_id), None) is not None
+
+        async def get_cache_generation(self, tenant_id: str) -> int:
+            return gen_db.get(tenant_id, 0)
+
+        async def increment_cache_generation(self, tenant_id: str) -> int:
+            gen_db[tenant_id] = gen_db.get(tenant_id, 0) + 1
+            return gen_db[tenant_id]
+
+    fake_repo = _FakeRepo()
+    fake_store = MagicMock()
+
+    async def _index_chunks(**_kw: object) -> int:
+        return 1
+
+    async def _delete_chunks(**_kw: object) -> int:
+        return 1
+
+    fake_store.index_chunks = _index_chunks
+    fake_store.delete_collection_chunks = _delete_chunks
+
+    monkeypatch.setattr(settings, "aws_backend_enabled", True)
+    monkeypatch.setattr(settings, "aws_dynamodb_table", "shared-table")
+    monkeypatch.setattr("app.services.ingestion_service.dynamodb_state_repo", fake_repo)
+    monkeypatch.setattr("app.services.semantic_cache.dynamodb_state_repo", fake_repo)
+    monkeypatch.setattr("app.services.ingestion_service.S3VectorKnowledgeStore", lambda **_kw: fake_store)
+
+    job_id = await svc.create_ingestion_job_async("file", "doc.txt", "tenant-ddb", "kb-ddb")
+    await svc.process_ingestion_job(
+        job_id,
+        content_override="Paragraph content longer than twenty characters for indexing.",
+        reconcile_existing=True,
+    )
+    status_row = await svc.get_job_status_async(job_id, "tenant-ddb")
+    assert status_row is not None and status_row["status"] == "completed"
+    cols = await svc.list_collections_async("tenant-ddb")
+    assert len(cols) == 1
+    assert await svc.delete_collection_async(str(cols[0]["id"]), "tenant-ddb") is True
+    assert await svc.list_collections_async("tenant-ddb") == []
+
+    # Worker shared-state claim skip (in_progress & completed) + clean run_loop shutdown
+    sqs_mock = MagicMock()
+    sqs_mock.receive_message.return_value = {"Messages": []}
+    sqs_mock.get_queue_attributes.return_value = {"Attributes": {}}
+    factory = MagicMock(spec=AWSClientFactory)
+    factory.get_client.return_value = sqs_mock
+    queue = SQSIngestionQueue(factory=factory, queue_url="https://127.0.0.1:9297/0/q")
+    worker = SQSIngestionWorker(queue=queue, vector_store=fake_store, state_repo=fake_repo)  # type: ignore[arg-type]
+
+    # Completed job redelivery skips reindexing and acks
+    dup_msg = QueuedMessage(
+        message_id="m-dup",
+        receipt_handle="rh-dup",
+        body={"job_id": job_id, "tenant_id": "tenant-ddb", "source_type": "file", "uri": "doc.txt"},
+    )
+    assert await worker.process_message(dup_msg) is True
+    sqs_mock.delete_message.assert_called_once()
+
+    # Active lease on another worker returns False without acking
+    jobs_db[("tenant-ddb", "job-busy")] = {"job_id": "job-busy", "status": "processing", "lease_owner": "other-worker"}
+    sqs_mock.delete_message.reset_mock()
+    busy_msg = QueuedMessage(
+        message_id="m-busy",
+        receipt_handle="rh-busy",
+        body={"job_id": "job-busy", "tenant_id": "tenant-ddb", "source_type": "file", "uri": "busy.txt"},
+    )
+    assert await worker.process_message(busy_msg) is False
+    sqs_mock.delete_message.assert_not_called()
+
+    stop_event = asyncio.Event()
+    stop_event.set()
+    await worker.run_loop(stop_event, poll_wait_seconds=1)
 
 
 @pytest.mark.asyncio

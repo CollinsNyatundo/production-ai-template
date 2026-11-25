@@ -91,6 +91,8 @@ def open_ingestion_modal(backend_api_url: str = "http://localhost:8000"):
                 if j_info.get("status") == "completed":
                     st.success("Ingestion job completed successfully!")
                     del st.session_state["active_ingest_job_id"]
+                elif j_info.get("status") == "retrying":
+                    st.warning(f"Attempt failed ({j_info.get('error')}); SQS retry in progress...")
                 elif j_info.get("status") == "failed":
                     st.error(f"Job failed: {j_info.get('error')}")
                     st.session_state.pop("active_ingest_job_id", None)

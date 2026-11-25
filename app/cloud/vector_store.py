@@ -131,10 +131,12 @@ class S3VectorKnowledgeStore:
             Metadata=metadata,
         )
 
-    def _get_s3_object_sync(self, key: str) -> bytes:
+    def _get_s3_object_sync(self, key: str) -> tuple[bytes, dict[str, str]]:
         s3 = self._factory.get_client("s3")
         resp = s3.get_object(Bucket=self.bucket_name, Key=key)
-        return bytes(resp["Body"].read())
+        raw_meta = resp.get("Metadata", {})
+        metadata = {str(k).lower(): str(v) for k, v in raw_meta.items()} if isinstance(raw_meta, dict) else {}
+        return bytes(resp["Body"].read()), metadata
 
     def _list_s3_keys_sync(self, prefix: str) -> List[str]:
         s3 = self._factory.get_client("s3")
@@ -183,7 +185,7 @@ class S3VectorKnowledgeStore:
 
     async def stage_ingestion_text(self, tenant_id: str, job_id: str, text: str) -> str:
         """Persist uploaded ingestion text to S3 staging (KMS-encrypted when configured)."""
-        key = f"tenants/{tenant_id}/staging/{job_id}.txt"
+        key = f"staging/{tenant_id}/{job_id}.txt"
         encrypted = False
         if self._kms_cipher and self._kms_cipher.key_id:
             payload = await self._kms_cipher.encrypt_text(tenant_id, text)
@@ -205,17 +207,17 @@ class S3VectorKnowledgeStore:
         return key
 
     async def load_staged_text(self, tenant_id: str, s3_key: str) -> str:
-        """Load and decrypt staged ingestion text for the given tenant."""
-        expected_prefix = f"tenants/{tenant_id}/staging/"
-        if not s3_key.startswith(expected_prefix):
+        """Load staged ingestion text for ``tenant_id``, decrypting strictly per object metadata."""
+        expected_prefixes = (f"staging/{tenant_id}/", f"tenants/{tenant_id}/staging/")
+        if not s3_key.startswith(expected_prefixes):
             raise PermissionError(f"Staging key '{s3_key}' does not belong to tenant '{tenant_id}'.")
-        raw = await asyncio.to_thread(self._get_s3_object_sync, s3_key)
+        raw, metadata = await asyncio.to_thread(self._get_s3_object_sync, s3_key)
         text = raw.decode("utf-8")
-        if self._kms_cipher and self._kms_cipher.key_id:
-            try:
-                return await self._kms_cipher.decrypt_text(tenant_id, text)
-            except (PermissionError, ValueError):
-                raise
+        is_encrypted = metadata.get("kms_encrypted", "").lower() == "true"
+        if is_encrypted:
+            if self._kms_cipher is None:
+                raise RuntimeError(f"Staged object '{s3_key}' is KMS-encrypted, but no KMS cipher is available.")
+            return await self._kms_cipher.decrypt_text(tenant_id, text)
         return text
 
     async def delete_staged_text(self, s3_key: str) -> None:
@@ -324,17 +326,17 @@ class S3VectorKnowledgeStore:
                 batch = vectors[start : start + _S3_VECTORS_MAX_BATCH]
                 await asyncio.to_thread(self._put_vectors_batch_sync, index_name, batch)
                 written_vector_keys.extend(v["key"] for v in batch)
-        except Exception:
-            # Clean up partial writes so failed jobs leave neither orphaned vectors nor archived objects
+        except BaseException:
+            # Clean up partial writes (including on cancellation) so failed jobs leave no orphans
             if written_vector_keys:
                 try:
-                    await asyncio.to_thread(self._delete_vectors_sync, index_name, written_vector_keys)
-                except Exception as cleanup_exc:
+                    await asyncio.shield(asyncio.to_thread(self._delete_vectors_sync, index_name, written_vector_keys))
+                except BaseException as cleanup_exc:
                     logger.warning("Partial vector cleanup failed for '%s': %s", collection_id, cleanup_exc)
             if written_s3_keys:
                 try:
-                    await asyncio.to_thread(self._delete_s3_keys_sync, written_s3_keys)
-                except Exception as cleanup_exc:
+                    await asyncio.shield(asyncio.to_thread(self._delete_s3_keys_sync, written_s3_keys))
+                except BaseException as cleanup_exc:
                     logger.warning("Partial S3 cleanup failed for '%s': %s", collection_id, cleanup_exc)
             raise
 
@@ -401,14 +403,22 @@ class S3VectorKnowledgeStore:
             content = str(meta_dict.get("preview", ""))
             if s3_key:
                 try:
-                    raw_bytes = await asyncio.to_thread(self._get_s3_object_sync, s3_key)
+                    raw_bytes, obj_meta = await asyncio.to_thread(self._get_s3_object_sync, s3_key)
                 except ClientError as exc:
                     code = str(exc.response.get("Error", {}).get("Code", ""))
                     if "NoSuchKey" in code or "NotFound" in code:
                         continue
                     raise
                 raw_text = raw_bytes.decode("utf-8")
-                if meta_dict.get("kms_encrypted") and self._kms_cipher:
+                obj_encrypted_flag = obj_meta.get("kms_encrypted", "").lower()
+                is_encrypted = (
+                    obj_encrypted_flag == "true" if obj_encrypted_flag else bool(meta_dict.get("kms_encrypted"))
+                )
+                if is_encrypted:
+                    if self._kms_cipher is None:
+                        raise RuntimeError(
+                            f"Archived chunk '{s3_key}' is KMS-encrypted, but no KMS cipher is configured."
+                        )
                     content = await self._kms_cipher.decrypt_text(tenant_id, raw_text)
                 else:
                     content = raw_text

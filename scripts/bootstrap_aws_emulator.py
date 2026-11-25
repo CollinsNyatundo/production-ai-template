@@ -40,7 +40,7 @@ def bootstrap_aws_resources(
     table_name = dynamodb_table or settings.aws_dynamodb_table
     cw_log_group = log_group or settings.aws_cloudwatch_log_group
 
-    # 1. S3 Bucket (AWS requires LocationConstraint outside us-east-1)
+    # 1. S3 Bucket (AWS requires LocationConstraint outside us-east-1) + staging lifecycle expiration
     s3 = client_factory.get_client("s3")
     try:
         s3.head_bucket(Bucket=bucket)
@@ -52,6 +52,22 @@ def bootstrap_aws_resources(
                 Bucket=bucket,
                 CreateBucketConfiguration={"LocationConstraint": client_factory.region_name},
             )
+    try:
+        s3.put_bucket_lifecycle_configuration(
+            Bucket=bucket,
+            LifecycleConfiguration={
+                "Rules": [
+                    {
+                        "ID": "expire-abandoned-staging-uploads",
+                        "Filter": {"Prefix": "staging/"},
+                        "Status": "Enabled",
+                        "Expiration": {"Days": 1},
+                    }
+                ]
+            },
+        )
+    except ClientError:
+        pass
 
     # 2. S3 Vectors Bucket
     s3v = client_factory.get_client("s3vectors")
@@ -108,8 +124,8 @@ def bootstrap_aws_resources(
         sqs.create_queue(
             QueueName=queue_prefix,
             Attributes={
-                "VisibilityTimeout": "5",
-                "RedrivePolicy": json.dumps({"deadLetterTargetArn": dlq_arn, "maxReceiveCount": "2"}),
+                "VisibilityTimeout": "30",
+                "RedrivePolicy": json.dumps({"deadLetterTargetArn": dlq_arn, "maxReceiveCount": "3"}),
             },
         )["QueueUrl"]
     )

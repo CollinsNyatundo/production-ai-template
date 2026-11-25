@@ -116,6 +116,7 @@ async def test_s3_vectors_and_kms_multi_tenant_rag_isolation(
     monkeypatch.setattr(settings, "aws_s3_bucket", emulator_resources["AWS_S3_BUCKET"])
     monkeypatch.setattr(settings, "aws_s3_vector_bucket", emulator_resources["AWS_S3_VECTOR_BUCKET"])
     monkeypatch.setattr(settings, "aws_kms_key_id", emulator_resources["AWS_KMS_KEY_ID"])
+    monkeypatch.setattr(settings, "aws_dynamodb_table", emulator_resources["AWS_DYNAMODB_TABLE"])
 
     job_alpha = create_ingestion_job("file", "alpha-policy.txt", "tenant-alpha", "alpha-kb")
     await process_ingestion_job(
@@ -319,13 +320,22 @@ async def test_sqs_worker_end_to_end_staged_ingestion_and_ack(
     emulator_resources: Dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SQSIngestionWorker consumes a staged S3/SQS job, indexes into S3 Vectors, and acknowledges it."""
+    """SQSIngestionWorker processes cross-replica jobs idempotently, persists DynamoDB state, and truly acks SQS."""
+    from app.services.ingestion_service import (
+        ACTIVE_COLLECTIONS,
+        INGESTION_JOBS,
+        create_ingestion_job_async,
+        get_job_status_async,
+        list_collections_async,
+    )
     from app.services.ingestion_worker import SQSIngestionWorker
+    from app.services.semantic_cache import SemanticCache
 
     monkeypatch.setattr(settings, "aws_backend_enabled", True)
     monkeypatch.setattr(settings, "aws_s3_bucket", emulator_resources["AWS_S3_BUCKET"])
     monkeypatch.setattr(settings, "aws_s3_vector_bucket", emulator_resources["AWS_S3_VECTOR_BUCKET"])
     monkeypatch.setattr(settings, "aws_kms_key_id", emulator_resources["AWS_KMS_KEY_ID"])
+    monkeypatch.setattr(settings, "aws_dynamodb_table", emulator_resources["AWS_DYNAMODB_TABLE"])
     monkeypatch.setattr(settings, "aws_sqs_queue_url", emulator_resources["AWS_SQS_QUEUE_URL"])
 
     factory = AWSClientFactory()
@@ -337,32 +347,61 @@ async def test_sqs_worker_end_to_end_staged_ingestion_and_ack(
         kms_cipher=cipher,
     )
     queue = SQSIngestionQueue(factory=factory, queue_url=emulator_resources["AWS_SQS_QUEUE_URL"])
-    worker = SQSIngestionWorker(queue=queue, vector_store=store, kms_cipher=cipher)
+    state_repo = DynamoDBStateRepository(factory=factory, table_name=emulator_resources["AWS_DYNAMODB_TABLE"])
+    worker = SQSIngestionWorker(queue=queue, vector_store=store, kms_cipher=cipher, state_repo=state_repo)
 
-    job_id = create_ingestion_job("file", "sqs-staged.txt", "tenant-sqs", "sqs-kb")
+    # Replica A caches a pre-upload answer and enqueues the staged job
+    replica_a_cache = SemanticCache()
+    await replica_a_cache.set("tenant-sqs", "Kilindini container dwell times", "No report on file", [])
+    assert await replica_a_cache.get("tenant-sqs", "Kilindini container dwell times") is not None
+
+    job_id = await create_ingestion_job_async("file", "sqs-staged.txt", "tenant-sqs", "sqs-kb")
     staging_key = await store.stage_ingestion_text(
         "tenant-sqs",
         job_id,
         "SQS Consumer Proof: Kilindini port container dwell times dropped by 18 percent after automation.",
     )
-    await queue.enqueue_job(
-        {
-            "job_id": job_id,
-            "tenant_id": "tenant-sqs",
-            "source_type": "file",
-            "uri": "sqs-staged.txt",
-            "collection_name": "sqs-kb",
-            "staging_s3_key": staging_key,
-        }
-    )
+    payload = {
+        "job_id": job_id,
+        "tenant_id": "tenant-sqs",
+        "source_type": "file",
+        "uri": "sqs-staged.txt",
+        "collection_name": "sqs-kb",
+        "staging_s3_key": staging_key,
+    }
+    await queue.enqueue_job(payload)
 
-    processed = await worker.process_once(max_messages=5, wait_seconds=2)
+    # Simulate Replica B executing the job with empty in-memory state
+    INGESTION_JOBS.pop(job_id, None)
+    processed = await worker.process_once(max_messages=1, wait_seconds=2)
     assert processed == 1
-    job_status = get_job_status(job_id, "tenant-sqs")
-    assert job_status is not None and job_status["status"] == "completed"
 
-    # Message was acknowledged so queue is empty and chunk is searchable via S3 Vectors
-    assert await queue.receive_jobs(max_messages=1, wait_seconds=1) == []
+    # Simulate Replica A polling status & collections with no local in-memory state
+    INGESTION_JOBS.pop(job_id, None)
+    ACTIVE_COLLECTIONS.clear()
+    job_status = await get_job_status_async(job_id, "tenant-sqs")
+    assert job_status is not None and job_status["status"] == "completed"
+    cols = await list_collections_async("tenant-sqs")
+    assert len(cols) == 1 and cols[0]["id"] == job_status["collection_id"]
+
+    # Replica A's cache MUST observe DynamoDB generation bump immediately
+    assert await replica_a_cache.get("tenant-sqs", "Kilindini container dwell times") is None
+
+    # Prove message was genuinely deleted (both visible AND in-flight not-visible counts are zero)
+    sqs_client = factory.get_client("sqs")
+    attrs = await asyncio.to_thread(
+        sqs_client.get_queue_attributes,
+        QueueUrl=emulator_resources["AWS_SQS_QUEUE_URL"],
+        AttributeNames=["ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible"],
+    )
+    assert attrs["Attributes"]["ApproximateNumberOfMessages"] == "0"
+    assert attrs["Attributes"]["ApproximateNumberOfMessagesNotVisible"] == "0"
+
+    # Simulate SQS duplicate redelivery after staging cleanup: must NOT fail or duplicate collection
+    await queue.enqueue_job(payload)
+    assert await worker.process_once(max_messages=1, wait_seconds=2) == 1
+    assert len(await list_collections_async("tenant-sqs")) == 1
+
     hits = await store.query("tenant-sqs", "Kilindini container dwell times", top_k=2)
     assert hits and "18 percent" in hits[0].content
 
