@@ -39,7 +39,14 @@ async def _ensure_aws_ingestion_ready() -> None:
     """Verify SQS RedrivePolicy is readable BEFORE creating jobs or staging uploads."""
     if not (settings.aws_backend_enabled and settings.aws_sqs_queue_url):
         return
-    max_receive = await sqs_ingestion_queue.get_max_receive_count()
+    try:
+        max_receive = await sqs_ingestion_queue.get_max_receive_count()
+    except Exception as exc:
+        logger.error("SQS readiness check failed before ingestion: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingestion queue unavailable; retry later.",
+        ) from exc
     if max_receive is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

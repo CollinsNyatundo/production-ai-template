@@ -495,6 +495,33 @@ async def test_ingest_routes_return_503_when_sqs_redrive_policy_unreadable(
     assert set(INGESTION_JOBS.keys()) == before_jobs
     stage_mock.assert_not_called()
 
+    # Transport failures (e.g. EndpointConnectionError) also return structured HTTP 503
+    from botocore.exceptions import EndpointConnectionError
+
+    async def _unreachable_sqs() -> int | None:
+        raise EndpointConnectionError(endpoint_url="https://127.0.0.1:9297")
+
+    monkeypatch.setattr("app.api.ingest.sqs_ingestion_queue.get_max_receive_count", _unreachable_sqs)
+    with pytest.raises(HTTPException) as exc_web_conn:
+        await start_ingestion(
+            BackgroundTasks(),
+            IngestRequest(source_type="web", uri="https://example.com/doc2"),
+            current_user=user,
+        )
+    assert exc_web_conn.value.status_code == 503
+
+    upload2 = UploadFile(filename="doc2.txt", file=BytesIO(b"hello world content"))
+    with pytest.raises(HTTPException) as exc_file_conn:
+        await start_file_ingestion(
+            BackgroundTasks(),
+            file=upload2,
+            collection_name="col-unready-2",
+            current_user=user,
+        )
+    assert exc_file_conn.value.status_code == 503
+    assert set(INGESTION_JOBS.keys()) == before_jobs
+    stage_mock.assert_not_called()
+
 
 @pytest.mark.asyncio
 async def test_load_staged_text_follows_object_kms_metadata_across_config_changes() -> None:
