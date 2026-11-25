@@ -272,6 +272,7 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
         *,
         failure_status: str = "failed",
         reconcile_existing: bool = False,
+        raise_on_error: bool = False,
     ) -> None:
         nonlocal call_count
         call_count += 1
@@ -315,7 +316,10 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
         *,
         failure_status: str = "failed",
         reconcile_existing: bool = False,
+        raise_on_error: bool = False,
     ) -> None:
+        if raise_on_error:
+            raise RuntimeError("simulated indexing error")
         INGESTION_JOBS[job_id]["status"] = failure_status
         INGESTION_JOBS[job_id]["error"] = "simulated indexing error"
 
@@ -338,6 +342,32 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
     sqs.delete_message.assert_not_called()
     s3.delete_objects.assert_not_called()
 
+    # Live queue policy reconciliation DOWN (3 -> 2) on the SAME running worker:
+    # attempt 2 is now terminal -> marks "failed" and deletes staged upload.
+    sqs.get_queue_attributes.return_value = {
+        "Attributes": {"RedrivePolicy": json.dumps({"deadLetterTargetArn": "arn:dlq", "maxReceiveCount": "2"})}
+    }
+    second_msg = QueuedMessage(
+        message_id="m-fail-2",
+        receipt_handle="rh-fail-2",
+        body=retry_msg.body,
+        receive_count=2,
+    )
+    assert await worker.process_message(second_msg) is False
+    assert INGESTION_JOBS["job-fail"]["status"] == "failed"
+    sqs.delete_message.assert_not_called()
+    s3.delete_objects.assert_called_once()
+
+    # Live queue policy reconciliation UP (2 -> 3) on the SAME running worker:
+    # attempt 2 is now non-terminal -> marks "retrying" and preserves staged upload.
+    s3.delete_objects.reset_mock()
+    sqs.get_queue_attributes.return_value = {
+        "Attributes": {"RedrivePolicy": json.dumps({"deadLetterTargetArn": "arn:dlq", "maxReceiveCount": "3"})}
+    }
+    assert await worker.process_message(second_msg) is False
+    assert INGESTION_JOBS["job-fail"]["status"] == "retrying"
+    s3.delete_objects.assert_not_called()
+
     # Terminal failure (receive_count=3 >= 3) marks "failed" and cleans up abandoned staging object
     final_msg = QueuedMessage(
         message_id="m-fail-3",
@@ -350,14 +380,42 @@ async def test_sqs_ingestion_worker_acknowledges_success_retries_and_deduplicate
     sqs.delete_message.assert_not_called()
     s3.delete_objects.assert_called_once()
 
-    # When RedrivePolicy cannot be read (returns None), worker marks "failed" so clients
-    # never hang forever in "retrying", while still preserving the staged upload for SQS retries.
+    # When RedrivePolicy cannot be read (returns None), worker records distinct "retry_pending"
+    # (so clients keep bounded tracking) and preserves staging; a subsequent redelivery succeeds.
     s3.delete_objects.reset_mock()
+    sqs.delete_message.reset_mock()
     sqs.get_queue_attributes.side_effect = _client_error("AccessDenied")
-    unknown_policy_worker = SQSIngestionWorker(queue=queue, vector_store=store)
-    assert await unknown_policy_worker.process_message(final_msg) is False
-    assert INGESTION_JOBS["job-fail"]["status"] == "failed"
+    unknown_msg_1 = QueuedMessage(
+        message_id="m-unk-1",
+        receipt_handle="rh-unk-1",
+        body={
+            "job_id": "job-unk",
+            "tenant_id": "tenant-a",
+            "source_type": "file",
+            "uri": "unk.txt",
+            "collection_name": "unk-kb",
+            "staging_s3_key": "staging/tenant-a/job-unk.txt",
+        },
+        receive_count=1,
+    )
+    assert await worker.process_message(unknown_msg_1) is False
+    assert INGESTION_JOBS["job-unk"]["status"] == "retry_pending"
+    assert isinstance(INGESTION_JOBS["job-unk"].get("updated_at"), float)
     s3.delete_objects.assert_not_called()
+    sqs.delete_message.assert_not_called()
+
+    # Second delivery succeeds even while RedrivePolicy remains unreadable
+    monkeypatch.setattr("app.services.ingestion_worker.process_ingestion_job", _complete_job)
+    unknown_msg_2 = QueuedMessage(
+        message_id="m-unk-2",
+        receipt_handle="rh-unk-2",
+        body=unknown_msg_1.body,
+        receive_count=2,
+    )
+    assert await worker.process_message(unknown_msg_2) is True
+    assert INGESTION_JOBS["job-unk"]["status"] == "completed"
+    sqs.delete_message.assert_called_once()
+    s3.delete_objects.assert_called_once()
     sqs.get_queue_attributes.side_effect = None
 
 
@@ -780,7 +838,7 @@ async def test_observability_sink_emits_and_detects_unprocessed_xray_segments() 
     assert await sink.emit_span("RAGPipeline.execute", 1.0, {}) is None
 
 
-def test_bootstrap_passes_location_constraint_outside_us_east_1() -> None:
+def test_bootstrap_passes_location_constraint_outside_us_east_1(caplog: pytest.LogCaptureFixture) -> None:
     s3 = MagicMock()
     s3.head_bucket.side_effect = _client_error("404")
     s3.get_bucket_lifecycle_configuration.return_value = {
@@ -822,12 +880,14 @@ def test_bootstrap_passes_location_constraint_outside_us_east_1() -> None:
     staging_rule = next(r for r in lc_rules if r["ID"] == "expire-abandoned-staging-uploads")
     assert staging_rule["Expiration"]["Days"] == 15
 
-    # If lifecycle read fails with AccessDenied, bootstrap MUST NOT overwrite existing lifecycle rules;
-    # and if CreateQueue hits QueueAlreadyExists (attribute drift), it reconciles via set_queue_attributes.
+    # If lifecycle read fails with AccessDenied, bootstrap MUST NOT overwrite existing lifecycle rules,
+    # emits an operator warning, and if CreateQueue hits QueueAlreadyExists it reconciles via set_queue_attributes.
     s3.put_bucket_lifecycle_configuration.reset_mock()
     s3.get_bucket_lifecycle_configuration.side_effect = _client_error("AccessDenied")
     sqs.create_queue.side_effect = [{"QueueUrl": "https://sqs/dlq"}, _client_error("QueueAlreadyExists")]
     sqs.get_queue_url.return_value = {"QueueUrl": "https://sqs/main"}
-    bootstrap_aws_resources(factory=factory, s3_bucket="eu-bucket", queue_prefix="q")
+    with caplog.at_level("WARNING", logger="scripts.bootstrap_aws_emulator"):
+        bootstrap_aws_resources(factory=factory, s3_bucket="eu-bucket", queue_prefix="q")
     s3.put_bucket_lifecycle_configuration.assert_not_called()
     sqs.set_queue_attributes.assert_called_once()
+    assert any("skipping staging expiration rule update" in rec.message for rec in caplog.records)

@@ -1,6 +1,10 @@
+import time
+
 import httpx
 import streamlit as st
 from skills import ALL_SKILLS
+
+RETRY_PENDING_TIMEOUT_SECONDS = 120.0
 
 
 @st.dialog("📁 Data Sources & Live Vector Syncing", width="large")
@@ -88,13 +92,38 @@ def open_ingestion_modal(backend_api_url: str = "http://localhost:8000"):
                 prog = float(j_info.get("progress", 0.0))
                 st.progress(prog)
                 st.caption(f"Status: `{j_info.get('status')}` | Chunks Processed: `{j_info.get('chunks_processed')}`")
-                if j_info.get("status") == "completed":
+                job_status = j_info.get("status")
+                retry_wait_map = st.session_state.setdefault("retry_pending_since", {})
+                if job_status == "completed":
                     st.success("Ingestion job completed successfully!")
+                    retry_wait_map.pop(active_job_id, None)
                     del st.session_state["active_ingest_job_id"]
-                elif j_info.get("status") == "retrying":
+                elif job_status == "retrying":
+                    retry_wait_map.pop(active_job_id, None)
                     st.warning(f"Attempt failed ({j_info.get('error')}); SQS retry in progress...")
-                elif j_info.get("status") == "failed":
+                elif job_status == "retry_pending":
+                    updated_at_raw = j_info.get("updated_at")
+                    started_at = (
+                        float(updated_at_raw)
+                        if isinstance(updated_at_raw, (int, float))
+                        else float(retry_wait_map.setdefault(active_job_id, time.time()))
+                    )
+                    elapsed = time.time() - started_at
+                    if elapsed < RETRY_PENDING_TIMEOUT_SECONDS:
+                        remaining = int(max(1.0, RETRY_PENDING_TIMEOUT_SECONDS - elapsed))
+                        st.warning(
+                            f"Attempt failed ({j_info.get('error')}); waiting up to {remaining}s for possible SQS redelivery..."
+                        )
+                    else:
+                        st.error(
+                            f"Job failed (no redelivery received within {int(RETRY_PENDING_TIMEOUT_SECONDS)}s): "
+                            f"{j_info.get('error')}"
+                        )
+                        retry_wait_map.pop(active_job_id, None)
+                        st.session_state.pop("active_ingest_job_id", None)
+                elif job_status == "failed":
                     st.error(f"Job failed: {j_info.get('error')}")
+                    retry_wait_map.pop(active_job_id, None)
                     st.session_state.pop("active_ingest_job_id", None)
         except Exception as ex:
             st.warning(f"Polling job status: {ex}")

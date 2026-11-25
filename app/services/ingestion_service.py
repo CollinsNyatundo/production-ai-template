@@ -166,6 +166,7 @@ async def process_ingestion_job(
     *,
     failure_status: str = "failed",
     reconcile_existing: bool = False,
+    raise_on_error: bool = False,
 ) -> None:
     job = INGESTION_JOBS.get(job_id)
     if not job:
@@ -234,6 +235,7 @@ async def process_ingestion_job(
         job["chunks_processed"] = indexed_count
         job["collection_id"] = col_id
         job["error"] = None
+        job["updated_at"] = time.time()
 
         ACTIVE_COLLECTIONS[col_id] = collection_record
         if _use_dynamodb_state():
@@ -245,8 +247,11 @@ async def process_ingestion_job(
             await dynamodb_state_repo.put_ingestion_job(tenant_id, job)
 
     except Exception as ex:
+        if raise_on_error:
+            raise
         job["status"] = failure_status
         job["error"] = str(ex)
+        job["updated_at"] = time.time()
         if _use_dynamodb_state():
             try:
                 await dynamodb_state_repo.put_ingestion_job(tenant_id, job)

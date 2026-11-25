@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import secrets
 from typing import Dict
 
@@ -21,6 +22,8 @@ from botocore.exceptions import ClientError
 
 from app.cloud.client import AWSClientFactory
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def bootstrap_aws_resources(
@@ -75,13 +78,23 @@ def bootstrap_aws_resources(
             else:
                 # Never overwrite existing bucket lifecycle rules if we could not read them
                 can_update_lifecycle = False
+                logger.warning(
+                    "Could not read S3 lifecycle configuration for bucket '%s' (%s); "
+                    "skipping staging expiration rule update.",
+                    bucket,
+                    code,
+                )
         if can_update_lifecycle:
             s3.put_bucket_lifecycle_configuration(
                 Bucket=bucket,
                 LifecycleConfiguration={"Rules": [*existing_rules, staging_rule]},
             )
-    except ClientError:
-        pass
+    except ClientError as exc:
+        logger.warning(
+            "Failed to configure S3 staging lifecycle expiration for bucket '%s': %s",
+            bucket,
+            exc,
+        )
 
     # 2. S3 Vectors Bucket
     s3v = client_factory.get_client("s3vectors")

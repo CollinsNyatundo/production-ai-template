@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
-from typing import Optional
+from typing import Optional, Tuple
 
 from app.cloud.queue_store import (
     DynamoDBStateRepository,
@@ -54,17 +55,52 @@ class SQSIngestionWorker:
         self._lease_seconds = max(10, lease_seconds)
         self._default_max_receive_count = max(1, default_max_receive_count)
         self._worker_id = f"worker-{uuid.uuid4().hex[:8]}"
-        self._cached_max_receive: Optional[int] = None
 
     def _use_shared_state(self) -> bool:
         return bool(settings.aws_backend_enabled and settings.aws_dynamodb_table)
 
-    async def _get_max_receive_count(self) -> Optional[int]:
-        if self._cached_max_receive is None:
-            resolved = await self._queue.get_max_receive_count()
-            if resolved is not None:
-                self._cached_max_receive = resolved
-        return self._cached_max_receive
+    async def _classify_failure(self, receive_count: int) -> Tuple[str, bool, Optional[int]]:
+        """Refresh queue RedrivePolicy on failure so live queue repairs take effect immediately.
+
+        Returns ``(failure_status, should_cleanup_staging, max_receive_count)``:
+        - Policy unreadable (``None``): ``("retry_pending", False, None)`` so clients keep
+          bounded tracking while preserving the staged upload in case SQS redelivers.
+        - Retries remaining: ``("retrying", False, max_receive_count)``.
+        - Terminal attempt: ``("failed", True, max_receive_count)``.
+        """
+        max_receive_count = await self._queue.get_max_receive_count()
+        if max_receive_count is None:
+            return "retry_pending", False, None
+        if receive_count < max_receive_count:
+            return "retrying", False, max_receive_count
+        return "failed", True, max_receive_count
+
+    async def _handle_attempt_failure(
+        self,
+        tenant_id: str,
+        job_id: str,
+        receive_count: int,
+        staging_s3_key: str,
+        error_msg: str,
+    ) -> None:
+        failure_status, should_cleanup_staging, max_receive_count = await self._classify_failure(receive_count)
+        INGESTION_JOBS[job_id]["status"] = failure_status
+        INGESTION_JOBS[job_id]["error"] = error_msg
+        INGESTION_JOBS[job_id]["updated_at"] = time.time()
+        if self._use_shared_state():
+            try:
+                await self._state_repo.put_ingestion_job(tenant_id, INGESTION_JOBS[job_id])
+            except Exception as persist_exc:
+                logger.warning("Failed to persist job '%s' failure state to DynamoDB: %s", job_id, persist_exc)
+        logger.warning(
+            "Ingestion job '%s' attempt failed (status=%s, attempt=%d/%s); leaving SQS message unacknowledged.",
+            job_id,
+            failure_status,
+            receive_count,
+            max_receive_count if max_receive_count is not None else "unknown",
+        )
+        if should_cleanup_staging:
+            await self._cleanup_staging_best_effort(staging_s3_key)
 
     async def _cleanup_staging_best_effort(self, staging_s3_key: str) -> None:
         if not staging_s3_key:
@@ -125,6 +161,7 @@ class SQSIngestionWorker:
             "collection_id": deterministic_collection_id(job_id),
             "chunks_processed": 0,
             "error": None,
+            "updated_at": time.time(),
         }
 
         # Check completion and claim an active lease BEFORE loading staging or indexing
@@ -153,15 +190,6 @@ class SQSIngestionWorker:
 
         INGESTION_JOBS[job_id] = seed_job
 
-        max_receive_count = await self._get_max_receive_count()
-        # Only delete staged objects when RedrivePolicy confirms this is the final attempt.
-        # If RedrivePolicy is absent or unreadable, mark "failed" (so clients never hang in
-        # "retrying" after delivery ends) while preserving the staged upload in case SQS retries.
-        should_cleanup_staging = max_receive_count is not None and message.receive_count >= max_receive_count
-        failure_status = (
-            "retrying" if (max_receive_count is not None and message.receive_count < max_receive_count) else "failed"
-        )
-
         done_event = asyncio.Event()
         heartbeat_task = asyncio.create_task(
             self._lease_heartbeat(tenant_id, job_id, message.receipt_handle, done_event)
@@ -169,40 +197,39 @@ class SQSIngestionWorker:
         try:
             content_override: Optional[str] = None
             if staging_s3_key:
-                try:
-                    content_override = await self._vector_store.load_staged_text(tenant_id, staging_s3_key)
-                except Exception as exc:
-                    logger.error("Failed to load staged upload '%s' for job '%s': %s", staging_s3_key, job_id, exc)
-                    INGESTION_JOBS[job_id]["status"] = failure_status
-                    INGESTION_JOBS[job_id]["error"] = str(exc)
-                    if self._use_shared_state():
-                        await self._state_repo.put_ingestion_job(tenant_id, INGESTION_JOBS[job_id])
-                    if should_cleanup_staging:
-                        await self._cleanup_staging_best_effort(staging_s3_key)
-                    return False
+                content_override = await self._vector_store.load_staged_text(tenant_id, staging_s3_key)
 
             await process_ingestion_job(
                 job_id,
                 content_override=content_override,
-                failure_status=failure_status,
                 reconcile_existing=message.receive_count > 1,
+                raise_on_error=True,
             )
             job = await get_job_status_async(job_id, tenant_id)
             if not job or job.get("status") != "completed":
-                logger.warning(
-                    "Ingestion job '%s' did not complete (status=%s, attempt=%d/%s); leaving SQS message unacknowledged.",
+                error_detail = str(job.get("error") or "ingestion did not complete") if job else "missing job state"
+                await self._handle_attempt_failure(
+                    tenant_id,
                     job_id,
-                    job.get("status") if job else "missing",
                     message.receive_count,
-                    max_receive_count if max_receive_count is not None else "unknown",
+                    staging_s3_key,
+                    error_detail,
                 )
-                if should_cleanup_staging:
-                    await self._cleanup_staging_best_effort(staging_s3_key)
                 return False
 
             await self._queue.acknowledge(message.receipt_handle)
             await self._cleanup_staging_best_effort(staging_s3_key)
             return True
+        except Exception as exc:
+            logger.error("Ingestion attempt error for job '%s': %s", job_id, exc)
+            await self._handle_attempt_failure(
+                tenant_id,
+                job_id,
+                message.receive_count,
+                staging_s3_key,
+                str(exc),
+            )
+            return False
         finally:
             done_event.set()
             heartbeat_task.cancel()
