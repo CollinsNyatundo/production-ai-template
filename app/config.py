@@ -41,6 +41,23 @@ class Settings(BaseSettings):
     langsmith_endpoint: str = Field(default="https://api.smith.langchain.com", validation_alias="LANGSMITH_ENDPOINT")
     langsmith_tracing_enabled: bool = Field(default=False, validation_alias="LANGSMITH_TRACING_ENABLED")
 
+    # Optional AWS Cloud-Native Backend (verified locally via aws/aws-emulator)
+    aws_backend_enabled: bool = Field(default=False, validation_alias="AWS_BACKEND_ENABLED")
+    aws_region: str = Field(default="us-east-1", validation_alias="AWS_REGION")
+    aws_endpoint_url: str = Field(default="", validation_alias="AWS_ENDPOINT_URL")
+    aws_ca_bundle: str = Field(default="", validation_alias="AWS_CA_BUNDLE")
+    aws_s3_bucket: str = Field(default="production-ai-docs", validation_alias="AWS_S3_BUCKET")
+    aws_s3_vector_bucket: str = Field(default="production-ai-vectors", validation_alias="AWS_S3_VECTOR_BUCKET")
+    aws_kms_key_id: str = Field(default="", validation_alias="AWS_KMS_KEY_ID")
+    aws_jwt_secret_name: str = Field(default="production-ai/jwt", validation_alias="AWS_JWT_SECRET_NAME")
+    aws_sqs_queue_url: str = Field(default="", validation_alias="AWS_SQS_QUEUE_URL")
+    aws_dynamodb_table: str = Field(default="production-ai-state", validation_alias="AWS_DYNAMODB_TABLE")
+    aws_cloudwatch_namespace: str = Field(default="ProductionAI/Template", validation_alias="AWS_CLOUDWATCH_NAMESPACE")
+    aws_cloudwatch_log_group: str = Field(
+        default="/production-ai-template/runtime",
+        validation_alias="AWS_CLOUDWATCH_LOG_GROUP",
+    )
+
     @property
     def cors_allowed_origins(self) -> List[str]:
         return [o.strip() for o in self.cors_allowed_origins_raw.split(",") if o.strip()]
@@ -49,8 +66,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def check_production_secrets(self) -> "Settings":
-        if self.app_env not in ("development", "test", "testing") and self.jwt_secret == _INSECURE_DEFAULT_JWT_SECRET:
-            raise ValueError(f"Refusing to start: APP_ENV='{self.app_env}' but JWT_SECRET is still default.")
+        if self.app_env not in ("development", "test", "testing"):
+            if self.aws_backend_enabled:
+                if not self.aws_jwt_secret_name.strip():
+                    raise ValueError(
+                        f"Refusing to start: APP_ENV='{self.app_env}' with AWS_BACKEND_ENABLED=true "
+                        "requires AWS_JWT_SECRET_NAME."
+                    )
+            elif not self.jwt_secret.strip() or self.jwt_secret == _INSECURE_DEFAULT_JWT_SECRET:
+                raise ValueError(f"Refusing to start: APP_ENV='{self.app_env}' but JWT_SECRET is still default.")
         return self
 
 

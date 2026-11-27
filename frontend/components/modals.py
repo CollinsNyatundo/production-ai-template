@@ -88,10 +88,13 @@ def open_ingestion_modal(backend_api_url: str = "http://localhost:8000"):
                 prog = float(j_info.get("progress", 0.0))
                 st.progress(prog)
                 st.caption(f"Status: `{j_info.get('status')}` | Chunks Processed: `{j_info.get('chunks_processed')}`")
-                if j_info.get("status") == "completed":
+                job_status = j_info.get("status")
+                if job_status == "completed":
                     st.success("Ingestion job completed successfully!")
                     del st.session_state["active_ingest_job_id"]
-                elif j_info.get("status") == "failed":
+                elif job_status == "retrying":
+                    st.warning(f"Attempt failed ({j_info.get('error')}); SQS retry in progress...")
+                elif job_status == "failed":
                     st.error(f"Job failed: {j_info.get('error')}")
                     st.session_state.pop("active_ingest_job_id", None)
         except Exception as ex:

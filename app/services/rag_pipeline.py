@@ -82,8 +82,11 @@ class RAGPipeline:
                 )
 
             # 2. Semantic Cache Check
+            cache_tenant = payload.tenant_id or "default-tenant"
+            cache_generation: int | None = None
             if payload.use_cache:
-                cached_response = await semantic_cache.get(payload.tenant_id or "default-tenant", payload.query)
+                cache_generation = await semantic_cache.get_tenant_generation_async(cache_tenant)
+                cached_response = await semantic_cache.get(cache_tenant, payload.query)
                 if cached_response:
                     span.set_attribute("cache_hit", True)
                     return cached_response
@@ -213,7 +216,11 @@ class RAGPipeline:
 
             if payload.use_cache:
                 await semantic_cache.set(
-                    payload.tenant_id or "default-tenant", payload.query, final_answer, packed_docs
+                    cache_tenant,
+                    payload.query,
+                    final_answer,
+                    packed_docs,
+                    expected_generation=cache_generation,
                 )
 
             # 11. Valuation Trajectory Logging (V - Gap Mitigation)

@@ -69,7 +69,11 @@ DEMO_USERS = {
 }
 
 
-def create_access_token(data: Dict[str, JSONValue], expires_delta: Optional[datetime.timedelta] = None) -> str:
+def create_access_token(
+    data: Dict[str, JSONValue],
+    expires_delta: Optional[datetime.timedelta] = None,
+    secret_key: Optional[str] = None,
+) -> str:
     """Generates a signed JWT bearer token."""
     to_encode = data.copy()
     if expires_delta:
@@ -77,8 +81,18 @@ def create_access_token(data: Dict[str, JSONValue], expires_delta: Optional[date
     else:
         expire = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=15)
     to_encode.update({"exp": int(expire.timestamp())})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    signing_key = secret_key if secret_key is not None else SECRET_KEY
+    encoded_jwt = jwt.encode(to_encode, signing_key, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+async def resolve_jwt_secret() -> str:
+    """Resolve JWT secret from AWS Secrets Manager when AWS backend is enabled."""
+    if not settings.aws_backend_enabled:
+        return SECRET_KEY
+    from app.cloud.secrets import aws_secrets_provider
+
+    return await aws_secrets_provider.get_jwt_secret()
 
 
 async def get_current_user(
@@ -101,7 +115,8 @@ async def get_current_user(
     # 2. JWT Bearer Token Authentication Check
     if token and isinstance(token, str):
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            signing_key = await resolve_jwt_secret()
+            payload = jwt.decode(token, signing_key, algorithms=[ALGORITHM])
             sub = payload.get("sub")
             if sub is None or not isinstance(sub, str):
                 raise HTTPException(
@@ -120,11 +135,19 @@ async def get_current_user(
 
             logger.info(f"Authenticated user '{user.username}' via JWT Bearer (Tenant: {user.tenant_id})")
             return user
+        except HTTPException:
+            raise
         except jwt.PyJWTError as e:
             logger.warning(f"JWT decode error: {e}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials.",
+            )
+        except Exception as e:
+            logger.error(f"JWT secret resolution failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service unavailable.",
             )
 
     # Fallback to local anonymous developer access if in development environment

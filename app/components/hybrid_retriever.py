@@ -1,17 +1,36 @@
 import logging
-from typing import List
+from typing import List, Optional
 
+from app.cloud.secrets import kms_envelope_cipher
+from app.cloud.vector_store import S3VectorKnowledgeStore
 from app.components.openkb_client import openkb_client
+from app.config import settings
 from app.models import SearchDocument
+from observability.tracer import current_user_context
 
 logger = logging.getLogger("app.components.hybrid_retriever")
 
 
 class HybridRetriever:
-    def __init__(self):
+    def __init__(self) -> None:
         logger.info("Initializing HybridRetriever via OpenKB sidecar integration...")
+        self._s3_vector_store = S3VectorKnowledgeStore(kms_cipher=kms_envelope_cipher)
 
-    async def retrieve(self, query: str, top_k: int = 5) -> List[SearchDocument]:
+    async def retrieve(self, query: str, top_k: int = 5, tenant_id: Optional[str] = None) -> List[SearchDocument]:
+        if settings.aws_backend_enabled:
+            ctx = current_user_context.get()
+            effective_tenant = tenant_id or (ctx["tenant_id"] if ctx else "default-tenant")
+            try:
+                aws_docs = await self._s3_vector_store.query(
+                    tenant_id=effective_tenant,
+                    query_text=query,
+                    top_k=top_k,
+                )
+                if aws_docs:
+                    return aws_docs[:top_k]
+            except Exception as exc:
+                logger.warning("S3 Vectors retrieval failed for tenant '%s' (%s); falling back.", effective_tenant, exc)
+
         logger.info(f"Retrieving candidate documents via OpenKB for query: {query}")
         try:
             raw_results = await openkb_client.query(query, limit=top_k)

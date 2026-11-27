@@ -1,18 +1,25 @@
+import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from app.cloud.queue_store import dynamodb_state_repo, sqs_ingestion_queue
+from app.cloud.secrets import kms_envelope_cipher
+from app.cloud.vector_store import S3VectorKnowledgeStore
+from app.config import settings
 from app.security.auth import User, get_current_user
 from app.services.connectors.file_extractor import extract_file_content
 from app.services.ingestion_service import (
-    create_ingestion_job,
-    delete_collection,
-    get_job_status,
-    list_collections,
+    INGESTION_JOBS,
+    create_ingestion_job_async,
+    delete_collection_async,
+    get_job_status_async,
+    list_collections_async,
     process_ingestion_job,
 )
 
+logger = logging.getLogger("app.api.ingest")
 router = APIRouter(prefix="/api/v1", tags=["Ingestion"])
 _MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
@@ -28,6 +35,25 @@ def _require_scope(user: User, scope: str) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Missing required scope: {scope}")
 
 
+async def _ensure_aws_ingestion_ready() -> None:
+    """Verify SQS RedrivePolicy is readable BEFORE creating jobs or staging uploads."""
+    if not (settings.aws_backend_enabled and settings.aws_sqs_queue_url):
+        return
+    try:
+        max_receive = await sqs_ingestion_queue.get_max_receive_count()
+    except Exception as exc:
+        logger.error("SQS readiness check failed before ingestion: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingestion queue unavailable; retry later.",
+        ) from exc
+    if max_receive is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingestion queue RedrivePolicy is missing or unreadable; retry later.",
+        )
+
+
 # ── Endpoint 1: JSON body for web / github / sql sources ──────────────────────
 @router.post("/ingest")
 async def start_ingestion(
@@ -39,11 +65,38 @@ async def start_ingestion(
     st_type = payload.source_type
     uri = payload.uri
     _require_scope(current_user, "write")
+    await _ensure_aws_ingestion_ready()
     t_id = current_user.tenant_id
     c_name = payload.collection_name or f"{st_type}-{uri.split('/')[-1]}"
 
-    job_id = create_ingestion_job(st_type, uri, t_id, c_name)
-    bg_tasks.add_task(process_ingestion_job, job_id, None)
+    job_id = await create_ingestion_job_async(st_type, uri, t_id, c_name)
+    if settings.aws_backend_enabled and settings.aws_sqs_queue_url:
+        try:
+            await sqs_ingestion_queue.enqueue_job(
+                {
+                    "job_id": job_id,
+                    "tenant_id": t_id,
+                    "source_type": st_type,
+                    "uri": uri,
+                    "collection_name": c_name,
+                }
+            )
+        except Exception as exc:
+            logger.error("Failed to enqueue SQS ingestion job '%s': %s", job_id, exc)
+            if job_id in INGESTION_JOBS:
+                INGESTION_JOBS[job_id]["status"] = "failed"
+                INGESTION_JOBS[job_id]["error"] = str(exc)
+                if settings.aws_dynamodb_table:
+                    try:
+                        await dynamodb_state_repo.put_ingestion_job(t_id, INGESTION_JOBS[job_id])
+                    except Exception:
+                        pass
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Ingestion queue unavailable.",
+            ) from exc
+    else:
+        bg_tasks.add_task(process_ingestion_job, job_id, None)
 
     return {
         "job_id": job_id,
@@ -62,6 +115,7 @@ async def start_file_ingestion(
 ):
     """Accept a multipart upload and ingest the file contents."""
     _require_scope(current_user, "write")
+    await _ensure_aws_ingestion_ready()
     uri = file.filename or "unknown-file"
     c_name = collection_name or f"file-{uri}"
     file_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
@@ -72,8 +126,43 @@ async def start_file_ingestion(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
 
-    job_id = create_ingestion_job("file", uri, current_user.tenant_id, c_name)
-    bg_tasks.add_task(process_ingestion_job, job_id, content_override)
+    job_id = await create_ingestion_job_async("file", uri, current_user.tenant_id, c_name)
+    if settings.aws_backend_enabled and settings.aws_sqs_queue_url:
+        vector_store = S3VectorKnowledgeStore(kms_cipher=kms_envelope_cipher)
+        staging_key: Optional[str] = None
+        try:
+            staging_key = await vector_store.stage_ingestion_text(current_user.tenant_id, job_id, content_override)
+            await sqs_ingestion_queue.enqueue_job(
+                {
+                    "job_id": job_id,
+                    "tenant_id": current_user.tenant_id,
+                    "source_type": "file",
+                    "uri": uri,
+                    "collection_name": c_name,
+                    "staging_s3_key": staging_key,
+                }
+            )
+        except Exception as exc:
+            logger.error("Failed to stage/enqueue SQS file job '%s': %s", job_id, exc)
+            if staging_key:
+                try:
+                    await vector_store.delete_staged_text(staging_key)
+                except Exception as cleanup_exc:
+                    logger.warning("Failed to clean up abandoned staging object '%s': %s", staging_key, cleanup_exc)
+            if job_id in INGESTION_JOBS:
+                INGESTION_JOBS[job_id]["status"] = "failed"
+                INGESTION_JOBS[job_id]["error"] = str(exc)
+                if settings.aws_dynamodb_table:
+                    try:
+                        await dynamodb_state_repo.put_ingestion_job(current_user.tenant_id, INGESTION_JOBS[job_id])
+                    except Exception:
+                        pass
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Ingestion queue unavailable.",
+            ) from exc
+    else:
+        bg_tasks.add_task(process_ingestion_job, job_id, content_override)
 
     return {
         "job_id": job_id,
@@ -84,7 +173,7 @@ async def start_file_ingestion(
 
 @router.get("/ingest/status/{job_id}")
 async def check_ingestion_status(job_id: str, current_user: User = Depends(get_current_user)):
-    job = get_job_status(job_id, current_user.tenant_id)
+    job = await get_job_status_async(job_id, current_user.tenant_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
     return job
@@ -94,14 +183,14 @@ async def check_ingestion_status(job_id: str, current_user: User = Depends(get_c
 async def get_collections(current_user: User = Depends(get_current_user)):
     return {
         "tenant_id": current_user.tenant_id,
-        "collections": list_collections(current_user.tenant_id),
+        "collections": await list_collections_async(current_user.tenant_id),
     }
 
 
 @router.delete("/collections/{collection_id}")
 async def remove_collection(collection_id: str, current_user: User = Depends(get_current_user)):
     _require_scope(current_user, "write")
-    success = delete_collection(collection_id, current_user.tenant_id)
+    success = await delete_collection_async(collection_id, current_user.tenant_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"Collection '{collection_id}' not found.")
     return {"status": "deleted", "collection_id": collection_id}
